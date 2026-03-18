@@ -1,10 +1,13 @@
 Welcome to my blog and memorys of me 🚀✨🪐
 
+--
+
 <a href="https://jinhangtao.github.io/blog" target="_blank">
   <button style="background-color:#1E40AF; color:white; padding:10px 20px; border-radius:5px; border:none; cursor:pointer;">
     Other Blog 🚀
   </button>
 </a>
+
 ---
 
 Here are a few short, natural options you can paste directly into your README.md:
