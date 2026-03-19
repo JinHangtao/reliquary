@@ -8,14 +8,21 @@ Welcome to my blog and memorys of me 🚀✨🪐
 </a>
 
 ---
+
+## What it is
+
+A place to hold the work made between ages 13 and 18 — drawings, 3D scenes, photography — before that version of the person gets too far away.
+
+---
+
+## Tech
+
+- **Three.js** — floating crystal fragments as navigation
+- **Canvas 2D** — procedurally drawn planet, rings, and star field
+- **Web Audio API** — fully custom audio engine: ambient tone, hover sounds, click sounds, panel/lightbox transitions, and an FM synthesis easter egg with six microtonal voices
+- **CSS** — custom cursor, right-side drawer panel (desktop), bottom-sheet panel (mobile), lightbox, grain overlay
+- Zero dependencies beyond Three.js. Zero frameworks. One file.
+
 This site exists because I wanted to keep something before it disappears.
 Here are a few short, natural options you can paste directly into your README.md:
-
-Option 1 (clean & simple):
-A personal portfolio showcasing original artworks—illustration, 3D, photography, AI, sound, and video—presented in an immersive, cosmic-inspired gallery.
-
-Option 2 (slightly more descriptive):
-A visually immersive portfolio featuring original artworks across multiple mediums, with a dark, cosmic aesthetic enhanced by subtle animations and 3D elements.
-
-Option 3 (more artistic tone):
 An immersive digital gallery blending art and technology, featuring original works in a cosmic-themed, interactive environment.
