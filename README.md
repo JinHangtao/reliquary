@@ -21,8 +21,7 @@ A place to hold the work made between ages 13 and 18 — drawings, 3D scenes, ph
 - **Canvas 2D** — procedurally drawn planet, rings, and star field
 - **Web Audio API** — fully custom audio engine: ambient tone, hover sounds, click sounds, panel/lightbox transitions, and an FM synthesis easter egg with six microtonal voices
 - **CSS** — custom cursor, right-side drawer panel (desktop), bottom-sheet panel (mobile), lightbox, grain overlay
-- Zero dependencies beyond Three.js. Zero frameworks. One file.
+- Zero dependencies beyond Three.js. Zero frameworks. 
 
 This site exists because I wanted to keep something before it disappears.
-Here are a few short, natural options you can paste directly into your README.md:
 An immersive digital gallery blending art and technology, featuring original works in a cosmic-themed, interactive environment.
