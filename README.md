@@ -8,7 +8,7 @@ Welcome to my blog and memorys of me 🚀✨🪐
 </a>
 
 ---
-
+This site exists because I wanted to keep something before it disappears.
 Here are a few short, natural options you can paste directly into your README.md:
 
 Option 1 (clean & simple):
