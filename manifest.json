@@ -1,0 +1,16 @@
+{
+  "name": "Jin Hangtao",
+  "short_name": "Hangtao",
+  "description": "金航滔的个人博客 · Portfolio · 作品集",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#111009",
+  "theme_color": "#0d0c0b",
+  "icons": [
+    {
+      "src": "images/my-icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
