@@ -3,91 +3,102 @@ Jin Hangtao Blog · 发文模板
                    Post Template
 ═══════════════════════════════════
 
-每次发帖只需改：
-Each post, only change:
-
-  1. 日期 ·  Date
-  2. 标题 ·  Title
-  3. 正文 ·  Body text
-  4. 三处 postX → 改成不重复的编号（post4、post5…） ·  Replace the 3x postX with a unique ID
-  5. 图片/视频文件名（放在 images/ 文件夹） ·  Image / video filename (put in images/ folder)
- 
-───────────────────────────────────
-已用编号
-Used IDs
-───────────────────────────────────
-post1 → 开源模型
-post2 → japan，第一次出國
-post3 → 貓貓
-post4 → 成瘾性和意志的关系
-post5 → 下一篇从这里开始
+每次发帖只需在 index.html 的 posts:[ ] 数组里加一条对象。
+位置在 SECTIONS 数组里，id:'blog' 那一段的 posts:[ ] 内部。
 
 ───────────────────────────────────
-模板: 文字指向链接link
-Template: Text hyperlink
+已用编号（date 随便写，不是 ID）
+Used posts
 ───────────────────────────────────
-
-<a href="放链接地址" target="_blank" style="color:var(--gold)">放要显示的文字</a>
+→ 成瘾性和意志关系
+→ 开源模型
+→ japan，第一次出國
+→ 貓貓
+→ 聖誕樹
+→ 我開創了我的 blog
+→ 下一篇从这里开始 ↓
 
 ───────────────────────────────────
 模板一：纯文字
 Template 1: Text only
 ───────────────────────────────────
-<article class="blog-post">
-  <div class="blog-meta">
-    <span class="blog-date">2026 . 3 . 13</span>
-  </div>
-  <h3 class="blog-title">标题</h3>
-  <p class="blog-body">正文内容</p>
-  <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
-    <div id="cl-postX" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px"></div>
-    <div class="comment-row" style="display:flex;gap:8px">
-      <input id="cn-postX" placeholder="留下大名" style="width:100px;background:var(--card);border:1px solid var(--line2);border-radius:7px;padding:8px 12px;color:var(--fg);font-family:'Jost',sans-serif;font-size:.72rem;outline:none">
-      <input id="cm-postX" placeholder="說點什麽..." style="flex:1;background:var(--card);border:1px solid var(--line2);border-radius:7px;padding:8px 12px;color:var(--fg);font-family:'Jost',sans-serif;font-size:.72rem;outline:none">
-      <button onclick="submitC('postX')" style="background:none;border:1px solid var(--gold-d);color:var(--gold);font-family:'Jost',sans-serif;font-size:.52rem;letter-spacing:.2em;padding:8px 16px;border-radius:7px;cursor:pointer">发送</button>
-    </div>
-  </div>
-</article>
+
+{ date:'2026 · 4 · 1',
+  title:'标题',
+  body:'正文内容。\n\n第二段用两个换行隔开。',
+},
 
 ───────────────────────────────────
-模板二：加图片（插在 </p> 后面）
-Template 2: With image (insert after </p>)
+模板二：加图片
+Template 2: With image
 ───────────────────────────────────
-<article class="blog-post">
-  <div class="blog-meta">
-    <span class="blog-date">2026 . 3 . 13</span>
-  </div>
-  <h3 class="blog-title">标题</h3>
-  <p class="blog-body">正文内容</p>
-  <img loading="lazy" src="images/文件名.jpg" style="width:100%;border-radius:10px;margin:14px 0;">
-  <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
-    <div id="cl-postX" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px"></div>
-    <div class="comment-row" style="display:flex;gap:8px">
-      <input id="cn-postX" placeholder="留下大名" style="width:100px;background:var(--card);border:1px solid var(--line2);border-radius:7px;padding:8px 12px;color:var(--fg);font-family:'Jost',sans-serif;font-size:.72rem;outline:none">
-      <input id="cm-postX" placeholder="說點什麽..." style="flex:1;background:var(--card);border:1px solid var(--line2);border-radius:7px;padding:8px 12px;color:var(--fg);font-family:'Jost',sans-serif;font-size:.72rem;outline:none">
-      <button onclick="submitC('postX')" style="background:none;border:1px solid var(--gold-d);color:var(--gold);font-family:'Jost',sans-serif;font-size:.52rem;letter-spacing:.2em;padding:8px 16px;border-radius:7px;cursor:pointer">发送</button>
-    </div>
-  </div>
-</article>
+
+{ date:'2026 · 4 · 1',
+  title:'标题',
+  body:'正文内容。',
+  img:'images/文件名.jpg',
+},
+
 ───────────────────────────────────
-模板三：加视频（插在 </p> 后面）
-Template 3: With video (insert after </p>)
+模板三：加视频
+Template 3: With video
 ───────────────────────────────────
-<article class="blog-post">
-  <div class="blog-meta">
-    <span class="blog-date">2026 . 3 . 13</span>
-  </div>
-  <h3 class="blog-title">标题</h3>
-  <p class="blog-body">正文内容</p>
-  <video controls poster="images/封面图.jpg" style="width:100%;border-radius:var(--ri);margin:16px 0;max-height:70vh">
-    <source src="images/视频文件名.mp4" type="video/mp4">
-  </video>
-  <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
-    <div id="cl-postX" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px"></div>
-    <div class="comment-row" style="display:flex;gap:8px">
-      <input id="cn-postX" placeholder="留下大名" style="width:100px;background:var(--card);border:1px solid var(--line2);border-radius:7px;padding:8px 12px;color:var(--fg);font-family:'Jost',sans-serif;font-size:.72rem;outline:none">
-      <input id="cm-postX" placeholder="說點什麽..." style="flex:1;background:var(--card);border:1px solid var(--line2);border-radius:7px;padding:8px 12px;color:var(--fg);font-family:'Jost',sans-serif;font-size:.72rem;outline:none">
-      <button onclick="submitC('postX')" style="background:none;border:1px solid var(--gold-d);color:var(--gold);font-family:'Jost',sans-serif;font-size:.52rem;letter-spacing:.2em;padding:8px 16px;border-radius:7px;cursor:pointer">发送</button>
-    </div>
-  </div>
-</article>
+
+{ date:'2026 · 4 · 1',
+  title:'标题',
+  body:'正文内容。',
+  video:'images/视频文件名.mp4',
+  videoPoster:'images/封面图.jpg',
+},
+
+───────────────────────────────────
+模板四：文字 + 标签
+Template 4: With tag badge
+───────────────────────────────────
+
+{ date:'2026 · 4 · 1',
+  title:'标题',
+  tag:'随便写个标签',
+  body:'正文内容。',
+},
+
+───────────────────────────────────
+模板：文字里插入超链接
+Template: Hyperlink inside body
+───────────────────────────────────
+
+正文里直接写 URL 不会自动变链接。
+如果需要链接，把 body 换成 bodyTrusted:true + 手写 HTML：
+
+注意：只有 about 那个 section 用了 bodyTrusted，
+blog posts 的 body 会自动 esc() 转义，
+所以链接写法暂时不支持，纯文字即可。
+
+───────────────────────────────────
+把帖子加到文件里的位置
+Where to insert in index.html
+───────────────────────────────────
+
+搜索这行：
+  { date:'2026 · 3 · 13',
+    title:'成瘾性和意志关系',
+
+在它上面插入新帖子（新帖在前 = 显示在最上面）：
+
+  { date:'2026 · 4 · 1',        ← 新帖
+    title:'新标题',
+    body:'正文...',
+  },
+  { date:'2026 · 3 · 13',       ← 原来最新的帖子
+    title:'成瘾性和意志关系',
+    ...
+
+───────────────────────────────────
+注意事项
+Notes
+───────────────────────────────────
+
+1. 每条末尾要有逗号 },
+2. 正文换行用 \n，换段用 \n\n
+3. 图片/视频文件放进 images/ 文件夹再推送
+4. 不需要任何 ID，不需要 HTML 标签，JS 自动渲染
