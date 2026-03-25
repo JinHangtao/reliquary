@@ -1,6 +1,4 @@
 <div align="center">
-  
-![Reliquary](images/readme-imagine.jpg)
 
 # Reliquary
 
@@ -19,6 +17,8 @@ Welcome to my blog and memories of me 🚀✨🪐
 ---
 
 ## What it is
+
+![Reliquary](images/readme-imagine.jpg)
 
 A place to hold the work made between ages 13 and 18 — drawings, 3D scenes, photography — before that version of the person gets too far away.
 
