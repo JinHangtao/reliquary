@@ -4,7 +4,10 @@ Jin Hangtao Blog · 发文模板
 ═══════════════════════════════════
 
 每次发帖只需在 index.html 的 posts:[ ] 数组里加一条对象。
+Each time you post, simply add one object to the posts:[ ] array in index.html.
+
 位置在 SECTIONS 数组里，id:'blog' 那一段的 posts:[ ] 内部。
+The location is inside the posts:[ ] under the section with id:'blog' in the SECTIONS array.
 
 ───────────────────────────────────
 已用编号（date 随便写，不是 ID）
