@@ -71,11 +71,21 @@ Template: Hyperlink inside body
 ───────────────────────────────────
 
 正文里直接写 URL 不会自动变链接。
+Writing a URL directly in the body will not automatically convert it into a link.
+
 如果需要链接，把 body 换成 bodyTrusted:true + 手写 HTML：
+If you need a hyperlink, replace body with bodyTrusted:true and manually write HTML.
 
 注意：只有 about 那个 section 用了 bodyTrusted，
+Note: Only the about section uses bodyTrusted.
+
 blog posts 的 body 会自动 esc() 转义，
+The body in blog posts will be automatically escaped using esc().
+
 所以链接写法暂时不支持，纯文字即可。
+So hyperlinks are currently not supported; use plain text only.
+
+───────────────────────────────────
 
 ───────────────────────────────────
 把帖子加到文件里的位置
@@ -83,10 +93,13 @@ Where to insert in index.html
 ───────────────────────────────────
 
 搜索这行：
+Search for this line:
+
   { date:'2026 · 3 · 13',
     title:'成瘾性和意志关系',
 
 在它上面插入新帖子（新帖在前 = 显示在最上面）：
+Insert the new post above it (new posts first = shown at the top):
 
   { date:'2026 · 4 · 1',        ← 新帖
     title:'新标题',
@@ -102,6 +115,10 @@ Notes
 ───────────────────────────────────
 
 1. 每条末尾要有逗号 },
+   Each entry must end with a comma },
 2. 正文换行用 \n，换段用 \n\n
+   Use \n for line breaks and \n\n for paragraphs
 3. 图片/视频文件放进 images/ 文件夹再推送
+   Put image/video files into the images/ folder before pushing
 4. 不需要任何 ID，不需要 HTML 标签，JS 自动渲染
+   No ID or HTML tags are needed; JS will render automatically
