@@ -1,8 +1,6 @@
 <div align="center">
-
-![Reliquary](images/readme-imagine.jpg)
-
 # Reliquary
+![Reliquary](images/readme-imagine.jpg)
 
 ![Animation](images/animation.gif)
 
