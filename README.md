@@ -38,3 +38,7 @@ A place to hold the work made between ages 13 and 18 — drawings, 3D scenes, ph
 This site exists because I wanted to keep something before it disappears.
 
 An immersive digital gallery blending art and technology, featuring original works in a cosmic-themed, interactive environment.
+
+---
+
+© Jin Hangtao. All rights reserved.
