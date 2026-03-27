@@ -36,7 +36,7 @@ A place to hold the work made between ages 13 and 18 — drawings, 3D scenes, ph
 
 Technical notes on shader architecture, audio engine design, pitfalls encountered, and known issues.
 
-[![DEVLOG](https://img.shields.io/badge/DEVLOG-Extended_Technical_Documentation-c49a52?style=for-the-badge)](https://reliquary.jinhangtao.com/devlog.html)
+[![DEVLOG](https://img.shields.io/badge/DEVLOG-Extended_Technical_Documentation-c49a52?style=for-the-badge)](https://github.com/JinHangtao/reliquary/blob/main/DEVLOG%20%E2%80%94%20reliquary.jinhangtao.com.pdf)
 
 ---
 
