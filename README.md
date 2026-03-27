@@ -32,6 +32,13 @@ A place to hold the work made between ages 13 and 18 — drawings, 3D scenes, ph
 > *featuring original works in a cosmic-themed, interactive environment.*
 
 ---
+## ✦ Dev Log
+
+Technical notes on shader architecture, audio engine design, pitfalls encountered, and known issues.
+
+[![DEVLOG](https://img.shields.io/badge/DEVLOG-Extended_Technical_Documentation-c49a52?style=for-the-badge)](https://reliquary.jinhangtao.com/devlog.html)
+
+---
 
 ## ✦ Tech
 
