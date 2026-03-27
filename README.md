@@ -2,11 +2,8 @@
 
 <!-- 打字动画 — github.com/DenverCoder1/readme-typing-svg -->
 [![Typing SVG](https://readme-typing-svg.demolab.com?font=Playfair+Display&size=32&duration=3000&pause=1200&color=C49A52&center=true&vCenter=true&width=700&lines=Reliquary;A+place+to+hold+what+was;Before+it+disappears)](https://git.io/typing-svg)
-
 <br>
-
 ![Animation](images/animation.gif)
-
 <br>
 
 [![Three.js](https://img.shields.io/badge/Three.js-000000?style=for-the-badge&logo=threedotjs&logoColor=white)](https://threejs.org)
