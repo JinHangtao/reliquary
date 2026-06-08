@@ -3698,20 +3698,44 @@ window._sceneState = {
           +'<span style="font-family:\'JetBrains Mono\',\'Courier New\',monospace;font-weight:400;font-size:.52rem;letter-spacing:.2em;text-transform:uppercase;color:#4a4642">'+esc(post.date)+'</span>';
         if(post.tag) html += '<span style="color:#c49a52;background:rgba(196,154,82,.08);border:1px solid #8c6d38;border-radius:5px;padding:3px 10px;font-family:Jost,sans-serif;font-size:.5rem;letter-spacing:.18em;text-transform:uppercase">'+esc(post.tag)+'</span>';
         html += '</div>';
-        // title
-        html += '<h3 style="font-family:\'Playfair Display\',serif;font-size:1.25rem;color:#f5f0e8;letter-spacing:.005em;margin-bottom:12px;line-height:1.35;font-weight:500;font-style:italic">'+esc(post.title)+'</h3>';
-        // body text — only collapse if genuinely long (>4 lines worth of chars)
+        // title — allow <em> and <a> tags, do not escape
+        html += '<h3 style="font-family:\'Playfair Display\',serif;font-size:1.25rem;color:#f5f0e8;letter-spacing:.005em;margin-bottom:12px;line-height:1.35;font-weight:500;font-style:italic">'+post.title+'</h3>';
+        // body text — supports string (legacy) or array (rich posts with HTML / section-break)
         if(post.body){
           var pid2 = 'blogbody-'+Math.random().toString(36).slice(2,7);
           var btn2 = 'blogbtn-'+Math.random().toString(36).slice(2,7);
-          // Estimate: ~55 chars per line at panel width, >4 lines = >220 chars
-          var isLong = post.body.length > 220;
-          var collapsedH = 'calc(1.85em * 4 + 0px)'; // exactly 4 lines
+          var bodyHtml = '';
+          if(Array.isArray(post.body)){
+            // Rich body: each item is a paragraph / img / section-break string with HTML
+            post.body.forEach(function(item){
+              if(item.indexOf('<section-break>') !== -1){
+                // render as a styled divider with label
+                var label = item.replace(/<section-break>/g,'').replace(/<\/section-break>/g,'');
+                bodyHtml += '<div style="display:flex;align-items:center;gap:12px;margin:22px 0 16px">'
+                  +'<div style="flex:1;height:1px;background:rgba(196,154,82,.18)"></div>'
+                  +'<span style="font-family:\'JetBrains Mono\',monospace;font-size:.5rem;letter-spacing:.22em;text-transform:uppercase;color:#c49a52;white-space:nowrap">'+esc(label)+'</span>'
+                  +'<div style="flex:1;height:1px;background:rgba(196,154,82,.18)"></div>'
+                  +'</div>';
+              } else if(item.indexOf('<img') === 0){
+                // raw img tag — inject directly
+                bodyHtml += item;
+              } else {
+                // regular paragraph, may contain <a>, <em> etc
+                bodyHtml += '<p style="font-family:Jost,sans-serif;font-weight:300;font-size:.82rem;line-height:2.15;color:#dedad0;letter-spacing:.02em;margin-bottom:10px">'+item+'</p>';
+              }
+            });
+          } else {
+            // Legacy plain-text body — escape and preserve newlines
+            bodyHtml = '<span style="white-space:pre-line">'+esc(post.body)+'</span>';
+          }
+          var bodyLen = Array.isArray(post.body) ? post.body.join('').length : post.body.length;
+          var isLong = bodyLen > 220;
+          var collapsedH = 'calc(1.85em * 4 + 0px)';
           var wrapId = isLong ? ('clpw-'+Math.random().toString(36).slice(2,7)) : '';
           if(isLong) html += '<div id="'+wrapId+'" class="clp-wrap">';
-          html += '<div id="'+pid2+'" style="font-family:Jost,sans-serif;font-weight:300;font-size:.82rem;line-height:2.15;color:#dedad0;white-space:pre-line;overflow:hidden;letter-spacing:.02em;'
+          html += '<div id="'+pid2+'" style="font-family:Jost,sans-serif;font-weight:300;font-size:.82rem;line-height:2.15;color:#dedad0;overflow:hidden;letter-spacing:.02em;'
             +(isLong ? 'max-height:'+collapsedH+';' : '')
-            +'transition:max-height .52s cubic-bezier(.4,0,.2,1)">'+esc(post.body)+'</div>';
+            +'transition:max-height .52s cubic-bezier(.4,0,.2,1)">'+bodyHtml+'</div>';
           if(isLong) html += '</div>';
           if(isLong){
             html += '<button id="'+btn2+'"'
