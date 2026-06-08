@@ -7023,5 +7023,27 @@ document.addEventListener('selectstart', function(e){
   console.log('%c戳一下你', 'color:#4a4642;font-size:13px;font-style:italic;font-family:serif;');
 })();
 </script>
+
+<!-- 防护脚本 -->
+<script>
+// 禁用右键
+document.addEventListener('contextmenu', e => e.preventDefault());
+// 禁止选中 & 拖拽
+document.addEventListener('selectstart', e => e.preventDefault());
+document.addEventListener('dragstart',   e => e.preventDefault());
+
+// 屏蔽快捷键
+document.addEventListener('keydown', e => {
+    const ctrl  = e.ctrlKey || e.metaKey;
+    const shift = e.shiftKey;
+    const k     = e.key;
+    if (
+        k === 'F12' ||
+        (ctrl && ['u','U','s','S','p','P','a','A'].includes(k)) ||
+        (ctrl && shift && ['I','i','J','j','C','c','K','k'].includes(k)) ||
+        (e.altKey && e.metaKey && k === 'I')
+    ) { e.preventDefault(); e.stopPropagation(); return false; }
+});
+</script>
 </body>
 </html>
