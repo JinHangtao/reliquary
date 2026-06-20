@@ -898,7 +898,7 @@ body::after {
     <div class="lb-col">
       <div class="lb-img" id="lbImgBox">
         <div class="lb-spinner" id="lbSpinner"></div>
-        <img id="lbImg" src="" alt="artwork">
+        <img id="lbImg" src="" alt="artwork" decoding="async">
       </div>
       <div class="lb-btns">
         <div class="lb-btns-left"><button type="button" id="lbPrev">←</button><button type="button" id="lbNext">→</button></div>
@@ -2335,16 +2335,16 @@ window._sceneState = {
       body:[
         '从构思到现在刚好五个月。我不确定自己中途放弃过多少次，但每次回来都把上次的东西推掉重写。这个过程很难用「有趣」来形容，更接近一种痛。',
         '这个应用叫 <a href="https://atelier-mise.vercel.app/en" target="_blank" style="color:var(--gold);border-bottom:1px solid var(--gold-d)">Atelier Mise</a>，一个独立画布编辑器。在没有边界的画布上自由思考，然后直接把结果导出来。',
-        '<img src="images/my app02.png" style="width:100%;border-radius:10px;margin:14px 0;">',
+        '<img src="images/my app02.png" loading="lazy" decoding="async" style="width:100%;border-radius:10px;margin:14px 0;">',
         '<section-break>核心功能全部自研确保可控结构</section-break>',
         '很多 bug 花了好几天，查到最后发现是自己两周前挖的坑。有些功能设计了三四个版本，最后用的是最早那个最简单的。坐在那里看着屏幕，真的会怀疑自己当初为什么要做这件事。',
-        '<img src="images/my app03.png" style="width:100%;border-radius:10px;margin:14px 0;">',
+        '<img src="images/my app03.png" loading="lazy" decoding="async" style="width:100%;border-radius:10px;margin:14px 0;">',
         '但停不下来。因为我找不到一个工具是我真正想用的那种——思考过程和最终结果能在同一个地方完成，不用来回倒腾。自己造是一个路子。',
-        '<img src="images/my app.png" style="width:100%;border-radius:10px;margin:14px 0;">',
+        '<img src="images/my app.png" loading="lazy" decoding="async" style="width:100%;border-radius:10px;margin:14px 0;">',
         '<section-break>现在的样子</section-break>',
         '自由画布、自由穿页、画线连接、图片编辑、排版导出只截取页面内容作为HTML，PPT，WORD。',
         '有Online和Offline。在线版：<a href="https://atelier-mise.vercel.app/en" target="_blank" style="color:var(--gold);border-bottom:1px solid var(--gold-d)">atelier-mise.vercel.app</a>',
-        '<img src="images/my app01.png" style="width:100%;border-radius:10px;margin:14px 0;">',
+        '<img src="images/my app01.png" loading="lazy" decoding="async" style="width:100%;border-radius:10px;margin:14px 0;">',
         '五个月，我想完成。这是给自己20岁生日礼物了。',
       ],
     },
@@ -3596,7 +3596,7 @@ window._sceneState = {
         var ratio = isTwoCol ? '3/4' : '16/9';
         html += '<div data-lbidx="'+esc(lbIdx)+'" data-lbsrc="'+esc(img.src)+'" data-tilt data-cap onclick="openLb(\''+esc(lbIdx)+'\')" '
           + 'style="position:relative;overflow:hidden;border-radius:11px;aspect-ratio:'+ratio+';background:#0e0d0c;border:1px solid #1e1c1a;cursor:none;transform-style:preserve-3d;will-change:transform;">'
-          + '<img src="'+esc(img.src)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;object-position:top;display:block;transition:filter .4s ease;filter:brightness(.78) saturate(.62) contrast(1.06);pointer-events:none">'
+          + '<img src="'+esc(img.src)+'" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover;object-position:top;display:block;transition:filter .4s ease;filter:brightness(.78) saturate(.62) contrast(1.06);pointer-events:none">'
           // shine overlay — follows mouse as a radial gradient hotspot
           + '<div class="gi-shine" style="position:absolute;inset:0;pointer-events:none;border-radius:11px;opacity:0;transition:opacity .35s ease;background:radial-gradient(circle at 50% 50%, rgba(255,240,190,.13) 0%, transparent 65%);"></div>'
           + '<div class="gi-cap" style="position:absolute;bottom:0;left:0;right:0;padding:'+(isTwoCol?'16px 14px 13px':'20px 22px 18px')+';background:linear-gradient(transparent,rgba(6,5,4,.9));opacity:0;transform:translateY(5px);transition:opacity .3s ease,transform .3s ease;pointer-events:none">'
@@ -3618,7 +3618,7 @@ window._sceneState = {
         var pdi = 'pnl-dur-'+ai;
         html += '<div style="display:flex;gap:18px;align-items:flex-start;margin-top:24px;background:#161513;border:1px solid #262320;border-radius:10px;padding:20px">';
         html += '<div style="width:72px;height:72px;border-radius:9px;overflow:hidden;flex-shrink:0;background:#1c1a18;border:1px solid #302d29">'
-          + '<img src="'+esc(a.cover)+'" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display=\'none\'">'
+          + '<img src="'+esc(a.cover)+'" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display=\'none\'">'
           + '</div>';
         html += '<div style="flex:1;min-width:0">'
           + '<div style="font-family:\'Playfair Display\',serif;font-size:1rem;color:#f2ede5;margin-bottom:6px">'+esc(a.title)+'</div>'
@@ -3773,7 +3773,7 @@ window._sceneState = {
         }
         // image
         if(post.img){
-          html += '<img loading="lazy" src="'+esc(post.img)+'" style="width:100%;border-radius:10px;margin-top:14px;display:block;filter:brightness(.85) saturate(.7)">';
+          html += '<img loading="lazy" decoding="async" src="'+esc(post.img)+'" style="width:100%;border-radius:10px;margin-top:14px;display:block;filter:brightness(.85) saturate(.7)">';
         }
         // video
         if(post.video){
