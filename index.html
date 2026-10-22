@@ -5477,7 +5477,11 @@ resetIdleTimer();
       }
 
       // Scale — graduated lerp, never direct assign
-      var targSc = cr.isCorner ? 1.0 : (1 + cr.hoverT*.12);
+      // 聚焦时：没被点中的角落石头（About / Blog）随镜头推进自然缩小退到背景，
+      // 避免"钉在屏幕角落"的 HUD 感；focusE 回落时自动恢复原大小
+      var targSc = cr.isCorner
+        ? ((focusCr && cr !== focusCr) ? 1.0 - 0.72*focusE : 1.0)
+        : (1 + cr.hoverT*.12);
       cr._sc += (targSc - cr._sc) * 0.18;
       cr.group.scale.setScalar(cr._sc);
 
@@ -5510,7 +5514,10 @@ resetIdleTimer();
       var hw = labelHalfW[i] || 40, hh = labelHalfH[i] || 30;
 
       if(cr.isCorner){
-        el.style.opacity = String(0.7 + cr.hoverT*0.3);
+        // 聚焦时：没被点中的角落名字随 focusE 一起淡出，回位时自然淡回
+        var _cOp = 0.7 + cr.hoverT*0.3;
+        if(focusCr && cr !== focusCr) _cOp *= (1 - 0.92*focusE);
+        el.style.opacity = String(_cOp);
         if(isMobile && focusCr !== cr && focusE > 0.0004 && cr._rsx !== undefined){
           // 手机：未被点击的角落石头会随镜头移动，名字跟着石头走（相对静止位的位移）
           if(cr._lblDX === undefined){ cr._lblDX = 0; cr._lblDY = 0; }
