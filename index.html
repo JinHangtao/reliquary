@@ -1487,8 +1487,10 @@ window._sceneState = {
     var _bgCx = _bgOn ? _bgv.cx : W*0.5, _bgCy = _bgOn ? _bgv.cy : H*0.5;
     var _bgRoll = _bgOn ? _bgv.roll : 0;
     var _stRoll = _bgOn ? _bgv.st.roll : 0;                                  // 星空自己的滚转（陀螺积分，翻过头顶也连续）
-    var _bgZoom = 1; // 天体在无穷远：推拉/FOV 变化时大小不变，只随镜头朝向移动
+    var _bgZoom = _bgOn && _bgv.f0 ? _bgv.f/_bgv.f0 : 1; // focal length ratio: stars scale with FOV exactly like the planet (dolly distance never matters at infinity)
     var _stX = _bgOn ? _bgv.st.x : 0, _stY = _bgOn ? _bgv.st.y : 0;     // 星空（无穷远）
+    // Stars at infinity: no parallax, no lag. Offsets come straight from the camera's integrated rotation (same camera, same frame as the planet).
+
     var _nbX = _bgOn ? _bgv.nb.x : 0, _nbY = _bgOn ? _bgv.nb.y : 0;     // 星云（很远但有限）
     var _nbFade = _bgOn && _bgv.nb.fade !== undefined ? _bgv.nb.fade : 1;   // 星云/雾的可见度（转到背面时为 0）
     // 星云是一组固定位置的柔和渐变，没法无缝平铺：把位移软限制在 ±0.3W / ±0.3H 内，
@@ -1661,11 +1663,11 @@ window._sceneState = {
     var _msx = ((_stX % W) + W) % W, _msy = ((_stY % H) + H) % H;
     _applySkyXform(_msx, _msy, _stRoll);
     (function(){
-      var _mgx = Math.hypot(W,H)*0.5, _mgy = _mgx;   // 任意角度滚转（含倒置）时四角需要的余量
-      for(var _tx=-1; _tx<=1; _tx++){
+      var _mgx = Math.hypot(W,H)*0.5/Math.min(1,_bgZoom), _mgy = _mgx;   // 任意角度滚转（含倒置）时四角需要的余量
+      for(var _tx=-2; _tx<=2; _tx++){
         var _ox = _tx*W;
         if(_msx + _ox > W + _mgx || _msx + _ox + W < -_mgx) continue;
-        for(var _ty=-1; _ty<=1; _ty++){
+        for(var _ty=-2; _ty<=2; _ty++){
           var _oy = _ty*H;
           if(_msy + _oy > H + _mgy || _msy + _oy + H < -_mgy) continue;
           ctx.drawImage(_starOffscreen, _ox, _oy);
@@ -2926,7 +2928,13 @@ window._sceneState = {
   // ══════════════════════════════════════════════════════
 
   // 星球的光（相机坐标系下的方向 + 强度）：所有晶体共用，每帧由背景同步块更新。
-  var _planetLight = { dir:{value:new THREE.Vector3(0.8,0.05,-0.6).normalize()}, I:{value:1} };
+  var _planetLight = { dir:{value:new THREE.Vector3(0.8,0.05,-0.6).normalize()}, I:{value:1} };   // （目前没有着色器读取它）
+  // 统一光源：key / rim 两盏光固定在“世界坐标”里，每帧按相机朝向换算到视图空间，
+  // 主晶体、小石头、玻璃折射环境共用同一组 uniform。默认机位下与原来的观感完全一致；
+  // 镜头环绕时，光不再像灯箱一样跟着镜头转，而是留在原地——石头亮面随视角真实变化。
+  var _SUN_KEY_W = new THREE.Vector3(-0.5, 0.8, 0.5).normalize();
+  var _SUN_RIM_W = new THREE.Vector3( 0.6,-0.2,-0.8).normalize();
+  var _sunUni = { key:{value:_SUN_KEY_W.clone()}, rim:{value:_SUN_RIM_W.clone()} };
 
   var crystalVS = `
     varying vec3 vNormal;
@@ -2951,6 +2959,8 @@ window._sceneState = {
     uniform float uDepth;   // 0=nearest(corner), 1=farthest — quadratic falloff applied below
     uniform vec3  uGoldColor;
     uniform vec3  uCrystalAxis; // long axis in world space
+    uniform vec3  uKeyDir;      // 统一光源（视图空间）
+    uniform vec3  uRimDir;
     varying vec3  vNormal;
     varying vec3  vViewDir;
     varying vec3  vWorldNormal;
@@ -2987,13 +2997,25 @@ window._sceneState = {
       return vec3(r,g,b);
     }
 
+    // ── 假环境（程序化 matcap）：渐变 + 地平线暖光 + 两盏柔光窗 ──
+    // 等价于一张 64×64 的小 matcap，但不占纹理、不新增 render target。
+    // d 为相机坐标系方向 → 环境跟着镜头走，像摄影棚里的灯箱。
+    vec3 fakeEnv(vec3 d){
+      float up = d.y * 0.5 + 0.5;
+      vec3 c = mix(vec3(0.030, 0.019, 0.008), vec3(0.016, 0.019, 0.032), up);
+      c += vec3(0.60, 0.38, 0.14) * exp(-(d.y + 0.05) * (d.y + 0.05) * 9.0) * 0.35;      // 地平线暖光带
+      c += vec3(1.00, 0.90, 0.70) * pow(max(dot(d, uKeyDir), 0.0), 20.0) * 0.85; // 主光窗
+      c += vec3(0.85, 0.60, 0.28) * pow(max(dot(d, uRimDir), 0.0), 10.0) * 0.40; // 轮廓金光
+      return c;
+    }
+
     void main(){
       vec3 N = normalize(vNormal);
       vec3 V = normalize(vViewDir);
 
       // Two light sources — both shifted warmer to kill green cast
-      vec3 L1 = normalize(vec3(-0.5, 0.8, 0.5));   // key — warm
-      vec3 L2 = normalize(vec3( 0.6,-0.2,-0.8));    // rim — gold
+      vec3 L1 = normalize(uKeyDir);   // key — warm
+      vec3 L2 = normalize(uRimDir);    // rim — gold
 
       float NdotV = max(dot(N,V), 0.0);
       float F0    = 0.08; // non-metal base reflectance
@@ -3030,6 +3052,28 @@ window._sceneState = {
       col += spec2 * gold * 1.0;
       col += fr    * gold * (0.82 + uHover*.32);
       col += irid  * iridMask;
+
+      // ── 玻璃感：假环境反射 + 沿面法线折射采样（三通道 IOR 略有差异 → 微色散）──
+      // 折射方向用 refract(-V, N)，每个硬面法线不同 → 每个刻面看到"背景"的不同位置。
+      // 全反射（refract 返回 0）时退化为反射。
+      {
+        vec3 I   = -V;
+        vec3 Rf  = reflect(I, N);
+        vec3 Tr  = refract(I, N, 0.70);
+        vec3 Tg  = refract(I, N, 0.667);
+        vec3 Tb  = refract(I, N, 0.635);
+        if(dot(Tg, Tg) < 0.001){ Tr = Rf; Tg = Rf; Tb = Rf; }
+        // 内部再弹一次：折射向量沿法线、沿晶体长轴略微偏移，模拟光在晶体里"拐弯"
+        vec3 bend = N * 0.55 + T * 0.20;
+        vec3 refr = vec3(fakeEnv(normalize(Tr + bend)).r,
+                         fakeEnv(normalize(Tg + bend)).g,
+                         fakeEnv(normalize(Tb + bend)).b);
+        vec3 refl = fakeEnv(Rf);
+        float envFade = 1.0 - uDepth * uDepth * 0.6;       // 远处的石头环境细节淡掉
+        float envAmt  = (0.85 + uHover * 0.35) * envFade;
+        col += refr * (1.0 - fr) * gold * 1.5 * 0.55 * envAmt;   // 折射：染成金色，压低避免发灰
+        col += refl * fr * 2.2 * envAmt;                          // 反射：掠射角更强
+      }
 
 
       // ── Interior core glow ──
@@ -3194,6 +3238,8 @@ window._sceneState = {
         // corner crystals get a slightly warmer brighter gold
         uGoldColor:   {value: isCorner ? new THREE.Color(0xe8be6a) : new THREE.Color(0xd4a85a)},
         uCrystalAxis: {value:crystalAxis},
+        uKeyDir:      _sunUni.key,
+        uRimDir:      _sunUni.rim,
       },
       transparent:true, side:THREE.DoubleSide, depthWrite:false,
     });
@@ -3312,10 +3358,9 @@ window._sceneState = {
     scene.add(stars);
     return stars;
   }
-  var _spatialStars = [];
-  _spatialStars.push(makeSpatialStarLayer(isMobile ? 480 : 980, -1180, -280, 3.1, 1.0, 2.0, 0.07, 0.19, 1471, -20)); // far field
-  _spatialStars.push(makeSpatialStarLayer(isMobile ? 170 : 380,  -260,   45, 2.4, 1.0, 2.1, 0.045, 0.13, 8237, -10)); // mid field
-  _spatialStars.push(makeSpatialStarLayer(isMobile ?  46 : 110,   115,  285, 1.9, 0.55, 1.25, 0.025, 0.085, 19331, 2)); // near dust
+  // The three 3D star layers were removed: each had its own perspective parallax, so they slid against each other
+  // while dragging, which contradicts a celestial sphere. Background stars are now ONE layer in the canvas
+  // (see _stX/_stY/_stRoll in draw()).
 
   // ── Label DOM elements ──
   var labelContainer = document.createElement('div');
@@ -3568,6 +3613,7 @@ window._sceneState = {
       _tsx = e.touches[0].clientX;
       _tsy = e.touches[0].clientY;
       _viewTouchActive = true;
+      _viewHome = false;            // 手指按下 = 抓住镜头，取消复位动画
       if(e.touches.length === 1){
         _viewTouchMoved = false;
         _viewTouchLastX = e.touches[0].clientX;
@@ -3598,7 +3644,10 @@ window._sceneState = {
       if(e.touches.length === 1){
         var tx = e.touches[0].clientX, ty = e.touches[0].clientY;
         var dx = tx - _viewTouchLastX, dy = ty - _viewTouchLastY;
-        if(Math.hypot(tx-_tsx, ty-_tsy) > 9) _viewTouchMoved = true;
+        if(Math.hypot(tx-_tsx, ty-_tsy) > 9){
+          if(!_viewTouchMoved){ dx = tx - _tsx; dy = ty - _tsy; }   // 补上阈值内被吞掉的位移
+          _viewTouchMoved = true;
+        }
         if(_viewTouchMoved){
           e.preventDefault();
           var now = performance.now();
@@ -3606,8 +3655,8 @@ window._sceneState = {
           var ay = -dx * 0.0032, ap = -dy * 0.00245;
           viewYawTarget = (viewYawTarget + ay);
           viewPitchTarget = (viewPitchTarget + ap);
-          viewYawVelocity = _viewClamp(ay/dt, -1.9, 1.9)*0.38 + viewYawVelocity*0.62;
-          viewPitchVelocity = _viewClamp(ap/dt, -1.5, 1.5)*0.38 + viewPitchVelocity*0.62;
+          _WOB.lever += -(((tx / W - 0.5) * 2) * (-dy) - (-(ty / H - 0.5) * 2) * dx) / H * 0.12;
+          // 速度不再手动估算：它是刚体状态，由 animate 里的弹簧—阻尼积分得出
           _viewTouchLastTime = now;
           document.body.classList.add('view-dragging');
         }
@@ -3621,8 +3670,8 @@ window._sceneState = {
         if(_viewTouchPinchDistance > 1){
           viewDistanceTarget = _viewClamp(viewDistanceTarget * (_viewTouchPinchDistance / Math.max(1,_dist)), VIEW_DIST_MIN, VIEW_DIST_MAX);
           var _dxp=_cx-_viewTouchLastX, _dyp=_cy-_viewTouchLastY;
-          viewPanXTarget = _viewClamp(viewPanXTarget - _dxp*0.34, -VIEW_PAN_X, VIEW_PAN_X);
-          viewPanYTarget = _viewClamp(viewPanYTarget + _dyp*0.34, -VIEW_PAN_Y, VIEW_PAN_Y);
+          viewPanXTarget = _viewClamp(viewPanXTarget - _dxp*0.34, -VIEW_PAN_X*VIEW_RUBBER, VIEW_PAN_X*VIEW_RUBBER);
+          viewPanYTarget = _viewClamp(viewPanYTarget + _dyp*0.34, -VIEW_PAN_Y*VIEW_RUBBER, VIEW_PAN_Y*VIEW_RUBBER);
         }
         _viewTouchPinchDistance = _dist;
         _viewTouchLastX = _cx; _viewTouchLastY = _cy;
@@ -4537,22 +4586,35 @@ window._sceneState = {
 
   // Mini crystal shader — simpler, dimmer, slightly different tint
   var miniFS = `
-    precision mediump float;
+    precision highp float;
     uniform float uTime;
     uniform float uPulse;
+    uniform float uGlint;   // 0..1 current glint activity of this stone (modulated intermittently in JS)
     uniform vec3  uGoldColor;
+    uniform vec3  uKeyDir;
+    uniform vec3  uRimDir;
     varying vec3 vNormal;
     varying vec3 vViewDir;
     void main(){
       vec3 N = normalize(vNormal);
       vec3 V = normalize(vViewDir);
       float fr  = pow(1.0-max(dot(N,V),0.0), 3.0);
-      vec3 L    = normalize(vec3(-0.6,0.8,0.5));
+      vec3 L    = normalize(uKeyDir);
       float dif = max(dot(N,L),0.0);
       vec3 col  = vec3(0.015,0.011,0.005);
       col += dif * uGoldColor * 0.14;
+      col += max(dot(N, normalize(uRimDir)), 0.0) * uGoldColor * 0.05;   // 与主晶体同一盏轮廓光
       col += fr  * uGoldColor * (0.28 + uPulse*0.22);
-      float alpha = 0.28 + fr*0.32 + uPulse*0.08;
+      // 晶面反光闪烁（光变曲线）：平面晶面转到“镜面方向”时整块面突然亮一下，再暗下去。
+      // Blinn-Phong 半程向量；法线是硬面法线，所以是整面一起闪，而不是渐变高光。
+      vec3  Ns = gl_FrontFacing ? N : -N;
+      vec3  H  = normalize(L + V);
+      float nh = max(dot(Ns, H), 0.0);
+      // Narrower specular lobe (400 vs 140): flashes only when a facet normal nearly bisects light and view.
+      // The broad lobe term is dropped (no constant faint shimmer). Scaled by uGlint: activity waxes and wanes.
+      float glint = pow(nh, 400.0) * 1.7 * uGlint * step(0.0, dot(Ns, L));
+      col += glint * vec3(1.0, 0.92, 0.72);
+      float alpha = 0.28 + fr*0.32 + uPulse*0.08 + glint*0.55;
       gl_FragColor = vec4(col, clamp(alpha,0.0,1.0));
     }
   `;
@@ -4570,6 +4632,78 @@ window._sceneState = {
   // All minis are drifters — no anchored stones, all flow in from edges
   var _anchorCount = 0;
 
+  // ══════════════════════════════════════════════════════════════════
+  //  刚体自转：无力矩刚体的欧拉方程（角动量守恒）
+  //     I1·ω1' = (I2 − I3)·ω2·ω3     I2·ω2' = (I3 − I1)·ω3·ω1     I3·ω3' = (I1 − I2)·ω1·ω2
+  //  主惯量 I 由几何包围盒估计（长方体近似）。绕最大 / 最小惯量轴自转是稳定的，
+  //  绕中间轴自转不稳定——微小扰动会指数增长，物体周期性“翻身”（中间轴定理 / Dzhanibekov 效应；
+  //  真实小行星中的翻滚体，如 Toutatis、Prendergast 2008 等，也是同一物理）。
+  //  朝向直接累乘在 group.quaternion 上：体坐标系角速度 ω_b → 四元数增量 exp(½ω_b·dt)。
+  // ══════════════════════════════════════════════════════════════════
+  var _rbDq = new THREE.Quaternion(), _rbAx = new THREE.Vector3(), _rbV = new THREE.Vector3(), _rbInv = new THREE.Quaternion();
+  function _rbMake(geo, opt){
+    opt = opt || {};
+    if(!geo.boundingBox) geo.computeBoundingBox();
+    var bb = geo.boundingBox;
+    var dx = bb.max.x - bb.min.x, dy = bb.max.y - bb.min.y, dz = bb.max.z - bb.min.z;
+    var I = [dy*dy + dz*dz, dx*dx + dz*dz, dx*dx + dy*dy];
+    var mean = (I[0] + I[1] + I[2]) / 3 || 1;
+    I = [I[0]/mean, I[1]/mean, I[2]/mean];
+    var idx = [0,1,2].sort(function(a,b){ return I[a] - I[b]; });      // idx[0]=最小, idx[1]=中间, idx[2]=最大
+    if(I[idx[1]] < I[idx[0]]*1.15) I[idx[1]] = I[idx[0]]*1.15;          // 保证三个主惯量互不相等，否则没有中间轴
+    if(I[idx[2]] < I[idx[1]]*1.15) I[idx[2]] = I[idx[1]]*1.15;
+    var w = [0,0,0];
+    if(opt.w){ w = opt.w.slice(); }
+    else {
+      var spin = 0.20 + Math.random()*0.32;                              // rad/s (slower: fewer facet sweeps through the mirror direction)
+      var r = Math.random();
+      var main = r < 0.35 ? idx[1] : (r < 0.7 ? idx[2] : idx[0]);        // 35% 绕中间轴 → 会翻滚；其余稳定自转（带章动）
+      w[main] = spin * (Math.random() < 0.5 ? -1 : 1);
+      var pert = (main === idx[1]) ? (0.08 + Math.random()*0.12) : (0.10 + Math.random()*0.25);
+      for(var k=0; k<3; k++) if(k !== main) w[k] = spin * pert * (Math.random()*2 - 1);
+    }
+    return { I:I, w:w, lever:_rndUnit({x:0,y:0,z:0}) };
+  }
+  function _rbDeriv(I, w, out){
+    out[0] = (I[1] - I[2]) * w[1] * w[2] / I[0];
+    out[1] = (I[2] - I[0]) * w[2] * w[0] / I[1];
+    out[2] = (I[0] - I[1]) * w[0] * w[1] / I[2];
+  }
+  var _rbk1=[0,0,0], _rbk2=[0,0,0], _rbk3=[0,0,0], _rbk4=[0,0,0], _rbt=[0,0,0];
+  function _rbStep(group, B, dt){
+    if(!B || dt <= 0) return;
+    dt = Math.min(dt, 0.1);
+    var n = Math.max(1, Math.ceil(dt / 0.02)), h = dt / n, I = B.I, w = B.w;
+    for(var s=0; s<n; s++){
+      var w0 = w[0], w1 = w[1], w2 = w[2];
+      _rbDeriv(I, w, _rbk1);
+      _rbt[0] = w0 + 0.5*h*_rbk1[0]; _rbt[1] = w1 + 0.5*h*_rbk1[1]; _rbt[2] = w2 + 0.5*h*_rbk1[2]; _rbDeriv(I, _rbt, _rbk2);
+      _rbt[0] = w0 + 0.5*h*_rbk2[0]; _rbt[1] = w1 + 0.5*h*_rbk2[1]; _rbt[2] = w2 + 0.5*h*_rbk2[2]; _rbDeriv(I, _rbt, _rbk3);
+      _rbt[0] = w0 + h*_rbk3[0];     _rbt[1] = w1 + h*_rbk3[1];     _rbt[2] = w2 + h*_rbk3[2];     _rbDeriv(I, _rbt, _rbk4);
+      w[0] = w0 + h/6*(_rbk1[0] + 2*_rbk2[0] + 2*_rbk3[0] + _rbk4[0]);
+      w[1] = w1 + h/6*(_rbk1[1] + 2*_rbk2[1] + 2*_rbk3[1] + _rbk4[1]);
+      w[2] = w2 + h/6*(_rbk1[2] + 2*_rbk2[2] + 2*_rbk3[2] + _rbk4[2]);
+      var mx = (w0 + w[0])*0.5, my = (w1 + w[1])*0.5, mz = (w2 + w[2])*0.5;   // 区间中点角速度
+      var wl = Math.sqrt(mx*mx + my*my + mz*mz);
+      if(wl > 1e-9){
+        _rbAx.set(mx/wl, my/wl, mz/wl);
+        _rbDq.setFromAxisAngle(_rbAx, wl*h);
+        group.quaternion.multiply(_rbDq);
+        group.quaternion.normalize();
+      }
+    }
+  }
+  // 外力矩（世界系力 dirW 作用在体坐标系压力中心 lever 上）→ 改变体坐标角速度
+  function _rbTorque(group, B, dirW, k, dt){
+    if(!B) return;
+    _rbInv.copy(group.quaternion).invert();
+    _rbV.set(dirW.x, dirW.y, dirW.z).applyQuaternion(_rbInv);
+    var L = B.lever;
+    B.w[0] += (L.y*_rbV.z - L.z*_rbV.y) * k * dt / B.I[0];
+    B.w[1] += (L.z*_rbV.x - L.x*_rbV.z) * k * dt / B.I[1];
+    B.w[2] += (L.x*_rbV.y - L.y*_rbV.x) * k * dt / B.I[2];
+  }
+
   for(var mi=0; mi<MINI_COUNT; mi++){
     var mscale = 2.5 + Math.random()*5.5; // 2.5–8, smaller than before (was 5–16)
     var mseed  = mi*31+7;
@@ -4580,7 +4714,10 @@ window._sceneState = {
       uniforms:{
         uTime:     {value:0},
         uPulse:    {value:0},
+        uGlint:    {value:0.1},
         uGoldColor:{value:new THREE.Color(0xb08840)}, // slightly darker gold
+        uKeyDir:   _sunUni.key,
+        uRimDir:   _sunUni.rim,
       },
       transparent:true, side:THREE.DoubleSide, depthWrite:false,
     });
@@ -4662,14 +4799,49 @@ window._sceneState = {
   }
 
   // Flyby stones removed.
+  minis.forEach(function(m){ m.rb = _rbMake(m.group.children[0].geometry); });
 
-  // Staggered: each stone in the batch spawns with a small time offset (0.3-1.2s apart)
-  // so they don't all appear simultaneously — feels like natural debris field flow
-  // ── 3D 体积生成 ──
-  // 石头不再只在 z≈0 的一层平面上从四边滑入，而是在整个球形空间里（X/Y/Z 全轴）出现：
-  //   · 55%  从外层球壳上的任意方向（含正前方、正后方、斜上、斜下）飞入，穿过场景体积
-  //   · 45%  直接在体积内部某个 3D 点“冒出来”（由小变大），再缓慢漂移
-  // 因此无论视角怎么环绕、俯仰、推近，石头在各个深度都有分布。
+  // ── 闪光活跃度：间歇性（intermittent），不是恒定节拍 ──
+  // 物理依据：平面晶面的镜面反射只出现在 法线 ≈ 平分(光源, 观察者) 的极窄角域（Blinn-Phong / Ward 波瓣）。
+  // 小天体光变曲线里的镜面闪（specular flash/glint）是稀疏、不规则的尖峰；
+  // 是否出现取决于自旋轴相对 太阳-观察者 的几何（相位角、自旋轴倾角），而非固定节拍；
+  // 翻滚体（非主轴自转, NPA rotators）的闪光序列准周期、强弱起伏（Kaasalainen 2001, Icarus;
+  // Mancuso et al. 2025, A&A —— 流星体旋转导致的准周期光变）。
+  // 这里用「状态切换 + 平滑」两态过程：每颗石头在 安静期(多数) / 活跃期(少数) 间随机切换，
+  // 驻留时间服从指数分布；活跃度平方偏斜 → 多数时间很低、偶尔很高。
+  function _glintStep(m, dt, tt){
+    var g = m.gl;
+    if(!g){ g = m.gl = { cur: 0.02 + Math.random()*0.08, tgt: 0.05, next: Math.random()*8, ph: Math.random()*6.283 }; }
+    g.next -= dt;
+    if(g.next <= 0){
+      var u = Math.random();
+      g.tgt = u < 0.62 ? 0.02 + Math.random()*0.08          // quiet: almost no flashes
+            : u < 0.90 ? 0.12 + Math.random()*0.28          // occasional
+            :            0.55 + Math.random()*0.45;         // active spell (rare)
+      g.next = -Math.log(1 - Math.random()) * (g.tgt > 0.5 ? 3.5 : 9) + 2;
+    }
+    g.cur += (g.tgt - g.cur) * (1 - Math.exp(-dt / 1.8));
+    var w = 0.65 + 0.35*Math.sin(tt*0.23 + g.ph)*Math.sin(tt*0.071 + g.ph*1.7);
+    m.mat.uniforms.uGlint.value = g.cur * g.cur * 1.6 * w;
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  小石头出现逻辑 —— 拟真宇宙碎屑环境（不再有任何“凭空冒出”）
+  //
+  //  参考的物理图景：
+  //   1) 主流（prevailing flow）：碎屑盘 / 小行星带里的物质有共同的公转方向，速度分布集中、
+  //      方向离散很小（Keplerian shear + 低离散度），所以石头顺着同一个大方向、从视野外很远处飞入。
+  //   2) 碰撞碎裂（collisional cascade, Dohnanyi 1969）：大块天体撞碎后产生幂律尺寸分布的碎片，
+  //      碎片 = 母体速度 + 抛射速度；动量守恒 → 小块飞得快、大块飞得慢，母体因此反冲并变小。
+  //   3) 彗星尘埃流 / 流星体流（meteoroid stream）：同源颗粒沿同一轨道成串排列，速度几乎一致，
+  //      形成“串珠状”成团（clumping），而不是均匀随机。
+  //   4) 气体拖曳 / 激波（Epstein drag, Weidenschilling 1977）：一阵波（如星风、抛射物前沿）扫过时，
+  //      颗粒按 a = (v_gas − v)/t_stop 被带动，t_stop 随尺寸增大 → 小石头被吹得更猛，大石头更迟钝；
+  //      波前陡峭、尾部拖长。被吹动的石头还会被拖曳力矩带得更快旋转。
+  //   5) 到达率是泊松过程（随机但有涨落），不是固定节拍。
+  //
+  //  所有石头都从“视锥之外”的上游入场；母体碎裂时碎片从母体内部迸出，且母体当场变小、发光。
+  // ══════════════════════════════════════════════════════════════════
   function _miniShellR(){ return Math.max(Math.hypot(visW, visH) * 1.7, 640); }
   function _rndUnit(out){
     var u = Math.random()*2 - 1, th = Math.random()*Math.PI*2, r = Math.sqrt(1 - u*u);
@@ -4677,112 +4849,338 @@ window._sceneState = {
     return out;
   }
   var _su = {x:0,y:0,z:0};
+  function _norm(o){ var l = Math.sqrt(o.x*o.x+o.y*o.y+o.z*o.z) + 1e-9; o.x/=l; o.y/=l; o.z/=l; return o; }
+  function _gauss(){ return (Math.random()+Math.random()+Math.random()-1.5) / 0.5; }   // ≈ N(0,1)
   function _volPoint(out, k){
-    // 场景体积内的随机点；Z 范围与 X/Y 同量级，而不是一层薄片
     k = k || 1;
     out.x = (Math.random()-.5) * visW * 2.1 * k;
     out.y = (Math.random()-.5) * visH * 2.1 * k;
     out.z = (Math.random()-.5) * 700 * k;
     return out;
   }
-  function _launchMini(m, mode, dirHint){
-    var R = _miniShellR();
-    var px, py, pz, vx, vy, vz;
-    var st = Math.random();
-    var speed = st < 0.3 ? (0.12 + Math.random()*0.10)
-              : st < 0.8 ? (0.22 + Math.random()*0.15)
-              :            (0.40 + Math.random()*0.20);
-    var tgt = _volPoint({x:0,y:0,z:0}, 0.8);
-    if(mode === 'inside'){
-      _volPoint(_su, 1.0);
-      px = _su.x; py = _su.y; pz = _su.z;
-      _rndUnit(_su);
-      var sp = 0.05 + Math.random()*0.14;
-      vx = _su.x*sp; vy = _su.y*sp; vz = _su.z*sp;
-      m.spawnT = 0; m.spawnDur = 1.1 + Math.random()*1.4;      // 冒出：缩放 0 → 1
-    } else {
-      var d = dirHint ? dirHint : _rndUnit(_su);
-      var jit = dirHint ? 0.22 : 0;                              // 石流：方向近似但有抖动
-      var dx = d.x + (Math.random()-.5)*jit, dy = d.y + (Math.random()-.5)*jit, dz = d.z + (Math.random()-.5)*jit;
-      var dl = Math.sqrt(dx*dx+dy*dy+dz*dz) + 1e-6;
-      px = dx/dl*R; py = dy/dl*R*0.75; pz = dz/dl*R;
-      var ex = tgt.x-px, ey = tgt.y-py, ez = tgt.z-pz;
-      var el = Math.sqrt(ex*ex+ey*ey+ez*ez) + 1e-6;
-      vx = ex/el*speed; vy = ey/el*speed; vz = ez/el*speed;       // 全向速度，z 分量不再被压到 0.3
-      m.spawnT = 0.6; m.spawnDur = 0.9;                           // 外层入场：轻微渐入
+  // 偏向屏幕平面的随机方向（纯朝向镜头的流动几乎看不出来，所以 z 分量压小）
+  function _rndFlowDir(out){
+    var a = Math.random()*Math.PI*2;
+    out.x = Math.cos(a); out.y = Math.sin(a)*0.7; out.z = (Math.random()-.5)*0.9;
+    return _norm(out);
+  }
+
+  // ── 主流方向：缓慢转向（几十秒量级），而不是每颗石头各飞各的 ──
+  // 每次进入页面都换一套“宇宙天气”：主流方向、波的方向、首波时间都不同。
+  // 上一次的方向记在 localStorage 里，这一次强制与它相差至少 ~80°，避免“每次一模一样”。
+  var _VKEY = 'jht_cosmos_v1', _last = {};
+  try{ _last = JSON.parse(localStorage.getItem(_VKEY) || '{}') || {}; }catch(e){ _last = {}; }
+  function _saveCosmos(){ try{ localStorage.setItem(_VKEY, JSON.stringify(_last)); }catch(e){} }
+  function _angDiff(a, b){ var d = Math.abs(a-b) % (Math.PI*2); return d > Math.PI ? Math.PI*2 - d : d; }
+  function _pickAngle(prev, minSep){
+    var a, n = 0;
+    do{ a = Math.random()*Math.PI*2; n++; } while(prev != null && _angDiff(a, prev) < minSep && n < 40);
+    return a;
+  }
+  function _dirFromAngle(out, a){
+    out.x = Math.cos(a); out.y = Math.sin(a)*0.7; out.z = (Math.random()-.5)*0.9;
+    return _norm(out);
+  }
+  var _flowA = _pickAngle(_last.flowA, 1.4);
+  _last.flowA = _flowA; _saveCosmos();
+  var _flow    = _dirFromAngle({x:0,y:0,z:0}, _flowA);
+  var _flowTgt = _dirFromAngle({x:0,y:0,z:0}, _flowA);
+  window._miniFlowTick = function(dt){
+    var k = Math.min(1, dt*0.04);
+    _flow.x += (_flowTgt.x-_flow.x)*k; _flow.y += (_flowTgt.y-_flow.y)*k; _flow.z += (_flowTgt.z-_flow.z)*k;
+    _norm(_flow);
+  };
+  (function _turnFlow(){
+    _flowA = _pickAngle(_flowA, 0.9);                              // 每次转向至少偏 ~50°
+    _last.flowA = _flowA; _saveCosmos();
+    _dirFromAngle(_flowTgt, _flowA);
+    setTimeout(_turnFlow, 50000 + Math.random()*40000);
+  })();
+
+  // ── 视锥判断：保证入场点一定在镜头看不到的地方 ──
+  var _pv = new THREE.Vector3();
+  function _inView(px, py, pz){
+    _pv.set(px,py,pz).applyMatrix4(camera.matrixWorldInverse);
+    if(_pv.z > -camera.near) return false;                       // 在相机背后
+    _pv.set(px,py,pz).project(camera);
+    return Math.abs(_pv.x) < 1.5 && Math.abs(_pv.y) < 1.5 && _pv.z < 1;
+  }
+  function _pushOffscreen(p, d, R){                               // 沿上游方向后退，直到看不见
+    for(var i=0; i<10 && _inView(p.x,p.y,p.z); i++){
+      p.x -= d.x*R*0.12; p.y -= d.y*R*0.12; p.z -= d.z*R*0.12;
     }
-    m.group.position.set(px, py, pz);
+    return p;
+  }
+  function _sizeBias(m){ return 1.12 - 0.24*Math.min(1, (m.scale-2.5)/5.5); }   // 小块略快
+
+  function _arm(m, px,py,pz, vx,vy,vz, k, grow){
+    m.group.position.set(px,py,pz);
     m.vx = vx; m.vy = vy; m.vz = vz;
     m.age = 0;
+    m.sizeK = k || 1; m._k = 0.001; m.growRate = grow || 3;
+    m.breakAt = null; m.spawnT = undefined;
     m.group.scale.setScalar(0.001);
-    m.alive = true;
-    m.group.visible = true;
+    m.alive = true; m.group.visible = true;
   }
-
-  function _spawnOne(dead){
-    if(dead.length === 0) return;
-    var m = null;
-    while(dead.length > 0){
-      var candidate = dead.splice(Math.floor(Math.random()*dead.length), 1)[0];
-      if(candidate && !candidate.alive){ m = candidate; break; }
-    }
-    if(!m) return;
-    _launchMini(m, Math.random() < 0.45 ? 'inside' : 'shell');
-  }
-
-  function _respawnBatch(){
+  function _takeDead(){
     var dead = minis.filter(function(m){ return m.isDrifter && !m.alive; });
-    if(dead.length === 0){
-      setTimeout(_respawnBatch, 5000 + Math.random()*9000);
-      return;
-    }
-    // Burst size: sometimes 1-2, sometimes 8-15 — irregular rhythm
-    var _burst = Math.random();
-    var count = Math.min(dead.length,
-      _burst < 0.4 ? (1 + Math.floor(Math.random()*3))    // calm: 1-3
-    : _burst < 0.75? (4 + Math.floor(Math.random()*5))    // medium: 4-8
-    :                (8 + Math.floor(Math.random()*8)));   // intense: 8-15
-    for(var _ri = 0; _ri < count; _ri++){
-      (function(delay, deadCopy){
-        setTimeout(function(){ _spawnOne(deadCopy); }, delay);
-      })(_ri * (50 + Math.random()*150), dead);
-    }
-    // Interval: sometimes quick bursts back to back, sometimes long pause
-    var _gap = Math.random();
-    var _interval = _gap < 0.3 ? (300  + Math.random()*700)    // rapid: 0.3-1s
-                 : _gap < 0.7  ? (1000 + Math.random()*2000)   // normal: 1-3s
-                 :                (3000 + Math.random()*4000);  // pause: 3-7s
-    setTimeout(_respawnBatch, _interval);
+    return dead.length ? dead[Math.floor(Math.random()*dead.length)] : null;
   }
-  setTimeout(_respawnBatch, 500);
+  function _deadCount(){ var n=0; for(var i=0;i<minis.length;i++) if(minis[i].isDrifter && !minis[i].alive) n++; return n; }
 
-  // Flyby timer removed.
-  // Ref: Asteroid Base devlog — "subtle clumping" makes space feel more real than pure random
-  // Triggers every 18-35 seconds, stones share same spawn side + similar velocity direction
+  // ① 主流中的单颗石头（可选：带“碎裂点”的母体 / 预热）
+  function _launchFlow(m, opt){
+    opt = opt || {};
+    var R = _miniShellR();
+    var d = {x:_flow.x+_gauss()*0.16, y:_flow.y+_gauss()*0.16, z:_flow.z+_gauss()*0.16}; _norm(d);
+    var st = Math.random();
+    var speed = (st < 0.3 ? (0.12 + Math.random()*0.10)
+               : st < 0.8 ? (0.22 + Math.random()*0.15)
+               :            (0.40 + Math.random()*0.20)) * _sizeBias(m) * (opt.speedMul || 1);
+    var tgt = _volPoint({x:0,y:0,z:0}, opt.parent ? 0.5 : 0.8);
+    var p = {x:tgt.x-d.x*R, y:tgt.y-d.y*R, z:tgt.z-d.z*R};
+    if(opt.prewarm){                                              // 开场：石头已经在途中，不是现造
+      var f = 0.6 + Math.random()*0.5;
+      p.x = tgt.x + d.x*(f-1)*R; p.y = tgt.y + d.y*(f-1)*R; p.z = tgt.z + d.z*(f-1)*R;
+    } else _pushOffscreen(p, d, R);
+    _arm(m, p.x,p.y,p.z, d.x*speed, d.y*speed, d.z*speed, 1, opt.prewarm ? 0.8 : 3);
+    if(opt.parent) m.breakAt = {x:tgt.x, y:tgt.y, z:tgt.z};
+  }
+
+  // ② 碰撞碎裂：碎片从母体内部迸出，动量守恒，母体反冲 + 缩小 + 发光
+  function _fragment(m){
+    var avail = _deadCount();
+    var n = Math.min(avail, 4 + Math.floor(Math.random()*5));
+    if(n < 2) return;
+    var parentK = 0.7, pk3 = parentK*parentK*parentK;
+    var u0 = 0.05 + Math.random()*0.07;
+    var Px = 0, Py = 0, Pz = 0;
+    var pp = m.group.position;
+    for(var i=0; i<n; i++){
+      var f = _takeDead(); if(!f) break;
+      var k = 0.32 + Math.pow(Math.random(), 1.6)*0.45;           // 幂律：小碎片多、大碎片少
+      _rndUnit(_su);
+      var spd = u0 * Math.sqrt(0.55/k) * (0.7 + Math.random()*0.6);   // 小块更快
+      _arm(f, pp.x + _su.x*2, pp.y + _su.y*2, pp.z + _su.z*2,
+              m.vx + _su.x*spd, m.vy + _su.y*spd, m.vz + _su.z*spd, k, 2.2);
+      f.pulseT = 1;                                                // 断裂瞬间发光
+      if(f.rb){ f.rb.w[0] += _gauss()*0.25; f.rb.w[1] += _gauss()*0.25; f.rb.w[2] += _gauss()*0.25; }   // 抛射带来的自旋
+      var k3 = k*k*k; Px += _su.x*spd*k3; Py += _su.y*spd*k3; Pz += _su.z*spd*k3;
+    }
+    m.vx -= Math.max(-0.12, Math.min(0.12, Px/pk3));              // 反冲
+    m.vy -= Math.max(-0.12, Math.min(0.12, Py/pk3));
+    m.vz -= Math.max(-0.12, Math.min(0.12, Pz/pk3));
+    m.sizeK = parentK; m.growRate = 5; m.pulseT = 1;
+    if(m.rb){ m.rb.w[0] += _gauss()*0.15; m.rb.w[1] += _gauss()*0.15; m.rb.w[2] += _gauss()*0.15; }
+  }
+  window._miniFragment = _fragment;
+
+  // ③ 流星体流：同源颗粒沿同一轨道串珠状成团，速度几乎一致
   function _spawnStream(){
-    var dead = minis.filter(function(m){ return m.isDrifter && !m.alive; });
-    if(dead.length < 3){
-      setTimeout(_spawnStream, 18000 + Math.random()*17000);
-      return;
-    }
-    // 一条石流：选一个任意 3D 方向（不再限于上下左右四边）
-    var streamDir = _rndUnit({x:0,y:0,z:0});
-    var streamCount = 3 + Math.floor(Math.random()*3); // 3-5 stones
-    streamCount = Math.min(streamCount, dead.length);
-
-    for(var _si=0; _si<streamCount; _si++){
-      (function(idx, deadArr){
-        setTimeout(function(){
-          if(deadArr.length === 0) return;
-          var m = deadArr.splice(Math.floor(Math.random()*deadArr.length),1)[0];
-          if(!m || m.alive) return;
-          _launchMini(m, 'shell', streamDir);
-        }, idx * (100 + Math.random()*120));
-      })(_si, dead);
+    if(_deadCount() >= 3){
+      var R = _miniShellR();
+      var d = _rndFlowDir({x:0,y:0,z:0});
+      d.x = d.x*0.6 + _flow.x*0.4; d.y = d.y*0.6 + _flow.y*0.4; d.z = d.z*0.6 + _flow.z*0.4; _norm(d);
+      var tgt = _volPoint({x:0,y:0,z:0}, 0.7);
+      var speed = 0.18 + Math.random()*0.20;
+      var p0 = {x:tgt.x-d.x*R, y:tgt.y-d.y*R, z:tgt.z-d.z*R};
+      _pushOffscreen(p0, d, R);
+      var cnt = Math.min(3 + Math.floor(Math.random()*3), _deadCount());
+      var gap = 18 + Math.random()*30;
+      for(var i=0; i<cnt; i++){
+        var m = _takeDead(); if(!m) break;
+        var s = speed * (1 + _gauss()*0.04);
+        _arm(m, p0.x - d.x*i*gap + _gauss()*8, p0.y - d.y*i*gap + _gauss()*8, p0.z - d.z*i*gap + _gauss()*8,
+                d.x*s, d.y*s, d.z*s, 1, 3);
+      }
     }
     setTimeout(_spawnStream, 18000 + Math.random()*17000);
   }
-  setTimeout(_spawnStream, 8000); // first stream after 8s
+  setTimeout(_spawnStream, 12000);
+
+  // ④ 一阵波：一个带陡峭波前的气体脉冲沿同一方向扫过整个空间（见更新循环里的拖曳耦合）
+  var _wave = null;
+  function _launchWaveStone(m){
+    var w = _wave, R = _miniShellR();
+    var lat = _volPoint({x:0,y:0,z:0}, 0.9);
+    var al = lat.x*w.dir.x + lat.y*w.dir.y + lat.z*w.dir.z;      // 去掉沿传播方向的分量
+    var s = Math.max(-w.L*1.05, w.front + _gauss()*w.width*0.5);
+    var p = {x:lat.x - w.dir.x*al + w.dir.x*s, y:lat.y - w.dir.y*al + w.dir.y*s, z:lat.z - w.dir.z*al + w.dir.z*s};
+    _pushOffscreen(p, w.dir, R);
+    var v = w.wind * (0.6 + Math.random()*0.4) * _sizeBias(m);
+    _arm(m, p.x,p.y,p.z, w.dir.x*v, w.dir.y*v, w.dir.z*v, 1, 3);
+  }
+  function _startWave(){
+    if(_deadCount() < 4){ setTimeout(_startWave, 8000); return; }
+    var R = _miniShellR(), L = R*0.9;
+    // 每道波性格不同：窄而急的“阵风” ←→ 宽而缓的“涌浪”；方向与上一道波（含上次访问）至少错开 ~85°
+    var dur = 14 + Math.random()*14;
+    var wA = _pickAngle(_last.waveA, 1.5);
+    _last.waveA = wA; _saveCosmos();
+    var d = _dirFromAngle({x:0,y:0,z:0}, wA);
+    _wave = { dir:d, front:-L, c:2*L/dur, width:L*(0.15 + Math.random()*0.17), wind:0.8 + Math.random()*0.7, L:L };
+    var n = Math.min(_deadCount(), 6 + Math.floor(Math.random()*7));
+    for(var i=0; i<n; i++){
+      setTimeout(function(){ var m = _takeDead(); if(m && _wave) _launchWaveStone(m); }, i*(60 + Math.random()*120));
+    }
+  }
+  window._miniWindTick = function(dt){
+    if(!_wave) return;
+    _wave.front += _wave.c * dt;
+    if(_wave.front > _wave.L*1.35){ _wave = null; setTimeout(_startWave, 50000 + Math.random()*35000); }
+  };
+  window._miniWave = function(){ return _wave; };
+  setTimeout(_startWave, 12000 + Math.random()*23000);
+
+  // ══════════════════════════════════════════════════════════════════
+  //  主晶体（可点击石头）的“宇宙环境”动力学
+  //
+  //  它们被锚定在作品入口的位置上，所以建模成“系泊天体”：弹簧–阻尼–受迫振子，
+  //  位置 = 锚点 + 偏移 o，轴向 = 基础自转 + 额外角速度 ω。受到：
+  //   1) 气体拖曳脉冲（同一道波）：a = (v_gas − v)/t_stop。面积∝s²、质量∝s³ → 大块更迟钝（t_stop 随尺寸增大）。
+  //      波前陡、尾部长；过后在回复力下回弹并衰减振铃（欠阻尼）。
+  //   2) 拖曳力矩：压力中心与质心不重合，τ = r_cp × F_drag，导致轴向被“拨动”。
+  //      之后非弹性内耗（Burns & Safronov 1973）把额外自转阻尼掉，轴向停在新的位置——波过之后朝向已经变了。
+  //   3) 恒定的辐射压 / 星风：沿主流方向的微小常力 → 稳态下整体略微“顺风偏斜”，并随主流缓慢转向。
+  //   4) YORP 效应（Rubincam 2000）：不对称辐射反冲产生的极慢扭矩，使自转轴（倾角）缓慢漂移。
+  //   5) 微流星体撞击：小石头真的飞过晶体时发生动量交换——晶体被轻推并获得微小自旋，小石头被散射并发光。
+  //   6) 低频湍流：不可公度频率的弱扰动，避免周期感。
+  //
+  //  为不影响点击：悬停时偏移被压低；打开面板/聚焦镜头时整体平静下来；偏移有软上限。
+  // ══════════════════════════════════════════════════════════════════
+  var _ccOut = {x:0, y:0, z:0};
+  var _ccAx  = new THREE.Vector3();
+  var _ccT   = 0;
+  window._crystalCosmos = function(cr, dt, tt, calm){
+    var S = cr._cs;
+    if(!S){
+      S = cr._cs = {
+        ox:0, oy:0, oz:0, vx:0, vy:0, vz:0,
+        wx:0, wy:0, wz:0,
+        lever: _rndUnit({x:0,y:0,z:0}),                       // 压力中心相对质心的偏移方向
+        w0: 0.85 + Math.random()*0.4,                         // 回复力固有频率 rad/s（周期约 5–7 s）
+        zeta: 0.25 + Math.random()*0.2,                       // 欠阻尼比
+        td: 3 + Math.random()*2.2,                            // 自转内耗时间常数
+        yorp: (Math.random()-.5) * 0.03,                      // rad/s，极慢
+        ph0: Math.random()*6.283, ph1: Math.random()*6.283, ph2: Math.random()*6.283,
+        hitCool: 0
+      };
+    }
+    dt = Math.min(dt, 0.05);
+    var p = cr.group.position;
+    var inertia = Math.max(0.35, 44 / cr.scale);              // 大块加速度小
+    var ax = 0, ay = 0, az = 0;
+
+    // 3) 辐射压 / 星风：沿主流的恒定微力
+    ax += _flow.x*4*inertia; ay += _flow.y*4*inertia; az += _flow.z*4*inertia*0.6;
+    // 6) 低频湍流
+    ax += Math.sin(tt*0.37 + S.ph0)*0.8*inertia;
+    ay += Math.sin(tt*0.29 + S.ph1)*0.8*inertia;
+    az += Math.sin(tt*0.23 + S.ph2)*0.5*inertia;
+
+    // 1)(2) 同一道波：气体拖曳 + 拖曳力矩
+    var w = window._miniWave ? window._miniWave() : null;
+    if(w){
+      var q = ((p.x*w.dir.x + p.y*w.dir.y + p.z*w.dir.z) - w.front) / w.width;
+      if(q > -3 && q < 3){
+        var env = q > 0 ? Math.exp(-q*q*3.0) : Math.exp(-q*q*0.6);
+        var ts  = 2.0 + cr.scale/25;
+        var vg  = w.wind * 60 * 0.55;
+        ax += (w.dir.x*vg - S.vx) / ts * env;
+        ay += (w.dir.y*vg - S.vy) / ts * env;
+        az += (w.dir.z*vg - S.vz) / ts * env * 0.6;
+        // τ = r_cp × F ；角惯量 ∝ s²
+        var il = (40 / cr.scale); il *= il;
+        var tx = S.lever.y*w.dir.z - S.lever.z*w.dir.y;
+        var ty = S.lever.z*w.dir.x - S.lever.x*w.dir.z;
+        var tz = S.lever.x*w.dir.y - S.lever.y*w.dir.x;
+        var kt = 0.16 * env * il * (w.wind/1.1);
+        S.wx += (tx + _gauss()*0.15) * kt * dt;
+        S.wy += (ty + _gauss()*0.15) * kt * dt;
+        S.wz += (tz + _gauss()*0.15) * kt * dt;
+      }
+    }
+
+    // 5) 微流星体撞击
+    S.hitCool -= dt;
+    if(S.hitCool <= 0){
+      var Rc = cr.scale * 0.55;
+      for(var i=0; i<minis.length; i++){
+        var m = minis[i];
+        if(!m.alive || !m.group.visible || (m._hitUntil && m._hitUntil > tt)) continue;
+        var dx = m.group.position.x - p.x, dy = m.group.position.y - p.y, dz = m.group.position.z - p.z;
+        var rr = Rc + m.scale*0.5;
+        var d2 = dx*dx + dy*dy + dz*dz;
+        if(d2 < rr*rr){
+          var dl = Math.sqrt(d2) + 1e-6;
+          var rvx = m.vx*60 - S.vx, rvy = m.vy*60 - S.vy, rvz = m.vz*60 - S.vz;
+          var rl  = Math.sqrt(rvx*rvx + rvy*rvy + rvz*rvz) + 1e-6;
+          var mr  = m.scale / cr.scale, kk = Math.min(0.25, 45*mr*mr*mr);   // 质量比（放大后仍很小）
+          S.vx += rvx*kk; S.vy += rvy*kk; S.vz += rvz*kk;
+          var nx = dx/dl, ny = dy/dl, nz = dz/dl, ux = rvx/rl, uy = rvy/rl, uz = rvz/rl;
+          var sk = 0.05 + kk*0.5;                              // 偏心撞击 → 自旋
+          S.wx += (ny*uz - nz*uy) * sk; S.wy += (nz*ux - nx*uz) * sk; S.wz += (nx*uy - ny*ux) * sk;
+          m.vx += nx*0.06; m.vy += ny*0.06; m.vz += nz*0.06;   // 小石头被散射
+          m.pulseT = 1;
+          m._hitUntil = tt + 6;
+          S.hitCool = 0.4;
+          break;
+        }
+      }
+    }
+
+    // 弹簧–阻尼：系泊回复力
+    ax -= S.w0*S.w0*S.ox + 2*S.zeta*S.w0*S.vx;
+    ay -= S.w0*S.w0*S.oy + 2*S.zeta*S.w0*S.vy;
+    az -= S.w0*S.w0*S.oz + 2*S.zeta*S.w0*S.vz;
+    S.vx += ax*dt; S.vy += ay*dt; S.vz += az*dt;
+    S.ox += S.vx*dt; S.oy += S.vy*dt; S.oz += S.vz*dt;
+    // 软上限：不管怎么推，都不会离开入口位置太远
+    var cap = cr.isCorner ? 14 : 30, ol = Math.sqrt(S.ox*S.ox + S.oy*S.oy + S.oz*S.oz);
+    if(ol > cap){ var g = cap/ol; S.ox *= g; S.oy *= g; S.oz *= g; S.vx *= 0.92; S.vy *= 0.92; S.vz *= 0.92; }
+
+    // 轴向：额外自转经内耗衰减，朝向因此“留”在新位置；YORP 让倾角缓慢漂移
+    var dec = Math.exp(-dt / S.td);
+    S.wx *= dec; S.wy *= dec; S.wz *= dec;
+    var wl = Math.sqrt(S.wx*S.wx + S.wy*S.wy + S.wz*S.wz);
+    if(wl > 0.0005){
+      _ccAx.set(S.wx/wl, S.wy/wl, S.wz/wl);
+      cr.group.rotateOnWorldAxis(_ccAx, wl*dt*calm);
+    }
+    _ccAx.set(_flow.x, _flow.y, _flow.z);
+    cr.group.rotateOnWorldAxis(_ccAx, S.yorp*dt*calm);
+
+    _ccOut.x = S.ox*calm; _ccOut.y = S.oy*calm; _ccOut.z = S.oz*0.6*calm;
+    return _ccOut;
+  };
+
+  // ⑤ 背景到达率：泊松过程 + 缓慢涨落 + 偶发成团；到达时间间隔指数分布
+  function _flux(){ return 1 + 0.5*Math.sin(Date.now()/23000); }
+  function _arrivals(){
+    var cnt = 1 + (Math.random() < 0.22 ? 1 + Math.floor(Math.random()*2) : 0);
+    for(var i=0; i<cnt; i++){
+      setTimeout(function(){ var m = _takeDead(); if(m) _launchFlow(m); }, i*(150 + Math.random()*250));
+    }
+    setTimeout(_arrivals, -Math.log(1 - Math.random()) * 1900 / _flux());
+  }
+  setTimeout(_arrivals, 500);
+
+  // ⑥ 碰撞碎裂事件：一颗较慢的母体飞进视野中央附近后碎裂
+  function _spawnParent(){
+    if(_deadCount() >= 6){ var m = _takeDead(); if(m) _launchFlow(m, {parent:true, speedMul:0.7}); }
+    setTimeout(_spawnParent, 28000 + Math.random()*22000);
+  }
+  setTimeout(_spawnParent, 10000);
+
+  // ⑦ 开场预热：不是“造出来”，而是“流早就在了”——石头已在途中，缓慢显影
+  (function(){
+    var n = isMobile ? 5 : 14;
+    for(var i=0; i<n; i++){
+      (function(delay){
+        setTimeout(function(){ var m = _takeDead(); if(m) _launchFlow(m, {prewarm:true}); }, delay);
+      })(500 + i*120);
+    }
+  })();
   function updateMouseWorld(ex,ey){
     prevMouseWorld.copy(mouseWorld);
     // Canvas is CANVAS_OVERHANG/2 px to the LEFT of the viewport origin (margin-left:-4vw).
@@ -4826,11 +5224,51 @@ window._sceneState = {
     }
 
     if(dragIdx>=0){
-      var m = minis[dragIdx];
-      m.group.position.x = mouseWorld.x + dragOffset.x;
-      m.group.position.y = mouseWorld.y + dragOffset.y;
+      _dragCX = e.clientX; _dragCY = e.clientY;
+      var _pdx = minis[dragIdx].group.position.x, _pdy = minis[dragIdx].group.position.y;
+      _dragUpdate();
+      // 抛掷速度：用石头自身位移（而不是 z=0 平面上的鼠标位移，后者与石头深度不一致）
+      throwVx = (minis[dragIdx].group.position.x - _pdx) * 0.6;
+      throwVy = (minis[dragIdx].group.position.y - _pdy) * 0.6;
+      _dragMoved = true;
     }
   });
+
+  // ── 拖拽：跟手修复 ──
+  // 旧版把鼠标射线投到 z=0 平面，再把同样的世界位移加给石头。但小石头散布在不同深度（anchored 在
+  // z≈-80~-20，drifter 在整个 3D 球壳里），透视下 z≠0 的石头屏幕位移与鼠标不是 1:1，
+  // 相机一旋转/漂移就更错位；而且位置只在 mousemove 时更新，相机动而鼠标不动时石头会"掉队"。
+  // 现在：mousedown 时记录石头在相机前向轴上的深度，之后每帧（以及每次 mousemove）把鼠标射线
+  // 与"垂直于相机、位于该深度"的平面求交，石头 = 交点 + 相机坐标系下的抓取偏移 → 始终贴在指针下。
+  var _dragCX = 0, _dragCY = 0, _dragDepth = 0, _dragOffR = 0, _dragOffU = 0, _dragMoved = false;
+  var _dV1 = new THREE.Vector3(), _dFwd = new THREE.Vector3(),
+      _dRight = new THREE.Vector3(), _dUp = new THREE.Vector3(), _dHit = new THREE.Vector3();
+  // 把屏幕坐标换成"相机前向轴上深度 = depth"的平面上的世界点，写入 out；失败返回 false
+  function _dragPlanePoint(cx, cy, depth, out){
+    camera.updateMatrixWorld();
+    _dV1.set(((cx + CANVAS_OVERHANG * 0.5) / CW) * 2 - 1, -(cy / H) * 2 + 1, 0.5).unproject(camera);
+    _dV1.sub(camera.position).normalize();
+    camera.getWorldDirection(_dFwd);
+    var cosA = _dV1.dot(_dFwd);
+    if(cosA < 0.05) return false;
+    out.copy(camera.position).addScaledVector(_dV1, depth / cosA);
+    return true;
+  }
+  function _dragUpdate(){
+    if(dragIdx < 0) return;
+    var m = minis[dragIdx];
+    if(!_dragPlanePoint(_dragCX, _dragCY, _dragDepth, _dHit)) return;
+    _dRight.setFromMatrixColumn(camera.matrixWorld, 0);
+    _dUp.setFromMatrixColumn(camera.matrixWorld, 1);
+    m.group.position.copy(_dHit).addScaledVector(_dRight, _dragOffR).addScaledVector(_dUp, _dragOffU);
+  }
+  window._miniDragTick = function(){
+    if(dragIdx < 0) return;
+    _dragUpdate();
+    // 鼠标停住时让抛掷速度衰减，避免停了半天再松手还被甩出去
+    if(!_dragMoved){ throwVx *= 0.6; throwVy *= 0.6; }
+    _dragMoved = false;
+  };
 
   // Drag: mousedown on mini crystal
   var miniRaycaster = new THREE.Raycaster();
@@ -4845,26 +5283,39 @@ window._sceneState = {
     miniRaycaster.setFromCamera(miniMouse2, camera);
     var hits2 = miniRaycaster.intersectObjects(miniMeshes, true);
     if(hits2.length>0){
-      // Find which mini
-      var hitMesh = hits2[0].object;
-      minis.forEach(function(m,i){
-        if(m.group.children[0]===hitMesh || m.group.children[0].children[0]===hitMesh){
-          dragIdx=i;
-          m.dragging=true;
-          updateMouseWorld(e.clientX,e.clientY);
-          // Resync prevMouseWorld so the first mousemove delta is zero.
-          // Without this, if the mouse was idle, prevMouseWorld is stale and
-          // throwVx/throwVy would get a huge spurious value on the very first move event.
-          prevMouseWorld.copy(mouseWorld);
-          _mouseWasIdle = false;
-          dragOffset.set(
-            m.group.position.x - mouseWorld.x,
-            m.group.position.y - mouseWorld.y,
-            0
-          );
-          m.vx=0; m.vy=0;
+      // Find which mini — 取最近的、真正可见且存活的（隐藏/未出生的石头不能被抓）
+      var _picked = -1;
+      for(var _hi = 0; _hi < hits2.length && _picked < 0; _hi++){
+        var hitMesh = hits2[_hi].object;
+        for(var _mi = 0; _mi < minis.length; _mi++){
+          var _mm = minis[_mi];
+          if((_mm.group.children[0]===hitMesh || _mm.group.children[0].children[0]===hitMesh) &&
+             _mm.group.visible && _mm.alive !== false){ _picked = _mi; break; }
         }
-      });
+      }
+      if(_picked >= 0){
+        var m = minis[_picked];
+        dragIdx=_picked;
+        m.dragging=true;
+        updateMouseWorld(e.clientX,e.clientY);
+        prevMouseWorld.copy(mouseWorld);   // 抛掷速度首帧不产生假值
+        _mouseWasIdle = false;
+        throwVx = 0; throwVy = 0;
+        // 相机坐标系下记录：石头所在深度 + 抓取点相对石头中心的偏移（以相机 right/up 为基）
+        _dragCX = e.clientX; _dragCY = e.clientY;
+        camera.updateMatrixWorld();
+        camera.getWorldDirection(_dFwd);
+        _dragDepth = _dV1.copy(m.group.position).sub(camera.position).dot(_dFwd);
+        if(_dragDepth < 1) _dragDepth = 1;
+        if(_dragPlanePoint(_dragCX, _dragCY, _dragDepth, _dHit)){
+          _dV1.copy(m.group.position).sub(_dHit);
+          _dRight.setFromMatrixColumn(camera.matrixWorld, 0);
+          _dUp.setFromMatrixColumn(camera.matrixWorld, 1);
+          _dragOffR = _dV1.dot(_dRight);
+          _dragOffU = _dV1.dot(_dUp);
+        } else { _dragOffR = 0; _dragOffU = 0; }
+        m.vx=0; m.vy=0; m.vz=0;
+      }
     }
   });
 
@@ -4875,9 +5326,11 @@ window._sceneState = {
       // Throw with mouse velocity
       m.vx = throwVx * 0.5;
       m.vy = throwVy * 0.5;
-      // Update base position to current
+      m.vz = 0;
+      // Update base position to current（含深度，否则松手后 z 会弹回旧位置）
       m.bx = m.group.position.x;
       m.by = m.group.position.y;
+      m.bz = m.group.position.z;
       dragIdx=-1;
     }
   });
@@ -4890,8 +5343,10 @@ window._sceneState = {
       m.dragging=false;
       m.vx = throwVx * 0.5;
       m.vy = throwVy * 0.5;
+      m.vz = 0;
       m.bx = m.group.position.x;
       m.by = m.group.position.y;
+      m.bz = m.group.position.z;
       dragIdx=-1;
     }
   }
@@ -4905,6 +5360,10 @@ window._sceneState = {
   var viewPanXTarget=0, viewPanYTarget=0, viewPanX=0, viewPanY=0;
   var viewDistanceTarget=520, viewDistance=520;
   var viewYawVelocity=0, viewPitchVelocity=0, viewPanXVelocity=0, viewPanYVelocity=0;
+  var viewDistVelocity=0;          // d(ln distance)/dt —— 缩放在对数空间里做物理，推拉手感才均匀
+  var _viewHome=false;             // 复位中：临界阻尼弹簧把镜头"拉回"原位，而不是瞬间改目标
+  var _viewBank=0;                 // 转向时的机身侧倾（rad），由偏航角速度驱动
+  var VIEW_RUBBER = 1.15;          // 拖拽时可拉过边界的比例（橡皮筋），松手后被边界弹簧拉回
   var _viewSuppressClick=false;
   // ── 扩大后的可移动视角范围 ──
   var VIEW_YAW_MAX   = Infinity;                 // 左右环绕：不设上限，可绕主体完整转 360° 以上
@@ -4923,6 +5382,7 @@ window._sceneState = {
       if((e.button !== 0 && e.button !== 1 && e.button !== 2) || panelOpen || focusE > 0.02 || dragIdx >= 0) return;
       _viewDrag.active = true;
       _viewDrag.moved = false;
+      _viewHome = false;            // 按下 = 抓住镜头，取消复位动画
       _viewDrag.mode = (e.button === 0 && !e.shiftKey) ? 'orbit' : 'pan';
       _viewDrag.downX = _viewDrag.lastX = e.clientX;
       _viewDrag.downY = _viewDrag.lastY = e.clientY;
@@ -4934,6 +5394,8 @@ window._sceneState = {
       var dy = e.clientY - _viewDrag.lastY;
       var total = Math.hypot(e.clientX - _viewDrag.downX, e.clientY - _viewDrag.downY);
       if(total > 6){
+        // 刚越过阈值的这一下：把前 6px 被吞掉的位移一并补上，否则起手会"顿一下再跳"
+        if(!_viewDrag.moved){ dx = e.clientX - _viewDrag.downX; dy = e.clientY - _viewDrag.downY; }
         _viewDrag.moved = true;
         document.body.classList.add('view-dragging');
       }
@@ -4946,15 +5408,13 @@ window._sceneState = {
           var ap = -dy * 0.0036;
           viewYawTarget = (viewYawTarget + ay);
           viewPitchTarget = (viewPitchTarget + ap);
-          viewYawVelocity = _viewClamp(ay / dt, -3.6, 3.6) * 0.46 + viewYawVelocity * 0.58;
-          viewPitchVelocity = _viewClamp(ap / dt, -2.8, 2.8) * 0.46 + viewPitchVelocity * 0.58;
+          // 抓取点杠杆：τz = x·dy − y·dx（屏幕归一化坐标，y 向上），相机滚转与场景相反
+          _WOB.lever += -(((e.clientX / W - 0.5) * 2) * (-dy) - (-(e.clientY / H - 0.5) * 2) * dx) / H * 0.12;
         } else {
           var px = -dx * 0.5;
           var py =  dy * 0.5;
-          viewPanXTarget = _viewClamp(viewPanXTarget + px, -VIEW_PAN_X, VIEW_PAN_X);
-          viewPanYTarget = _viewClamp(viewPanYTarget + py, -VIEW_PAN_Y, VIEW_PAN_Y);
-          viewPanXVelocity = _viewClamp(px / dt, -320, 320) * 0.4 + viewPanXVelocity * 0.6;
-          viewPanYVelocity = _viewClamp(py / dt, -260, 260) * 0.4 + viewPanYVelocity * 0.6;
+          viewPanXTarget = _viewClamp(viewPanXTarget + px, -VIEW_PAN_X*VIEW_RUBBER, VIEW_PAN_X*VIEW_RUBBER);
+          viewPanYTarget = _viewClamp(viewPanYTarget + py, -VIEW_PAN_Y*VIEW_RUBBER, VIEW_PAN_Y*VIEW_RUBBER);
         }
       }
       _viewDrag.lastX = e.clientX;
@@ -4982,16 +5442,215 @@ window._sceneState = {
     canvas.addEventListener('wheel', function(e){
       if(panelOpen || focusE > 0.02) return;
       e.preventDefault();
-      viewDistanceTarget = _viewClamp(viewDistanceTarget * Math.exp(e.deltaY * 0.0014), VIEW_DIST_MIN, VIEW_DIST_MAX);
+      // 滚轮 = 给对数距离一个冲量（而不是直接改目标）：连续滚动会叠加成速度，停手后靠阻尼自然滑停。
+      // 冲量 = 原来每格的对数位移 × 阻尼率，使单格滚动的最终位移与旧版一致。
+      _viewHome = false;
+      viewDistVelocity = _viewClamp(viewDistVelocity + e.deltaY * 0.0014 * 5.4 * (0.88 + Math.random()*0.24), -5.0, 5.0);
+      _ZW.wn = 6.8 * (0.82 + Math.random()*0.36); _ZW.zt = 0.40 + Math.random()*0.22;   // 每次滚动的回弹频率/阻尼都略不同
     }, {passive:false});
   }
+
+  // ══════════════════════════════════════════════════════
+  // 视角刚体物理（取代旧的"目标 + 指数插值 + 手估速度"）
+  //   · 状态 = 位置 p、速度 v（偏航/俯仰/平移X/平移Y/对数距离，5 个轴）。
+  //   · 手抓住时：质点被一根临界阻尼弹簧拉向指针目标 → 有重量感的跟手；
+  //     松手瞬间的速度就是镜头真实速度，所以"甩一下"和"停住再放"自然区分，不再靠估算。
+  //   · 松手后自由滑行，三种摩擦叠加：
+  //       粘性 μ1·v（低速平滑收尾） + 二次 μ2·v|v|（高速时空气阻力，猛甩不会无限飞） + 库仑 μc（最后一点点干脆停住，不拖尾）
+  //   · 平移 / 缩放有边界弹簧（软墙）：冲出边界会被弹回并略有回弹；拖拽时表现为橡皮筋。
+  //   · 复位：临界阻尼弹簧归位（偏航/俯仰取最近的 2π 倍数，不会倒转一整圈）。
+  //   · 固定小步长（≤8ms）半隐式欧拉，低帧率下也稳定。
+  // ══════════════════════════════════════════════════════
+  var _VAX = {
+    yaw:  { mu1:3.6,  mu2:0.55,   muc:0.07, s0:0.03, lo:-Infinity, hi:Infinity,  homeW:4.8 },
+    pitch:{ mu1:3.8,  mu2:0.58,   muc:0.07, s0:0.03, lo:-Infinity, hi:Infinity,  homeW:4.8 },
+    px:   { mu1:5.6,  mu2:0.0010, muc:5.0,  s0:6,    lo:-VIEW_PAN_X, hi:VIEW_PAN_X, homeW:5.0 },
+    py:   { mu1:5.6,  mu2:0.0010, muc:5.0,  s0:6,    lo:-VIEW_PAN_Y, hi:VIEW_PAN_Y, homeW:5.0 },
+    dist: { mu1:6.4,  mu2:0.18,   muc:0.03, s0:0.03, lo:Math.log(VIEW_DIST_MIN), hi:Math.log(VIEW_DIST_MAX), homeW:4.4 }
+  };
+  var _VGRAB_W = 26.0;      // 抓取弹簧角频率：越大越跟手，越小越"有分量"
+  var _VWALL_K = 70.0, _VWALL_C = 9.0;   // 边界软墙：ω≈8.4，阻尼比≈0.55（轻微回弹）
+  var _TWO_PI = Math.PI * 2;
+  var _vRelT = 5, _vFric = 1, _vWasBusy = false, _vRand = 1;   // 松手后经过的时间 / 摩擦缩放
+  function _axisStep(ax, h, busy, home, homeVal, p, v, t){
+    // 返回在 ax._p/_v 里
+    var a = 0;
+    if(home){
+      var w = ax.homeW;
+      a = w*w*(homeVal - p) - 2*w*v;
+    } else if(busy){
+      a = _VGRAB_W*_VGRAB_W*(t - p) - 2*_VGRAB_W*v;
+    } else {
+      var sp = v < 0 ? -v : v;
+      // 干摩擦做成"软库仑"：速度越小越趋于 0，停下时没有突然刹住的那一下；
+      // 摩擦整体乘 _vFric（松手后 0.3s 内由 0 平滑升到 1），避免松手瞬间减速度阶跃 → 丝滑过渡
+      var dv = (ax.mu1*sp + ax.mu2*sp*sp + ax.muc * sp/(sp + ax.s0)) * _vFric * h;
+      v = dv >= sp ? 0 : (v > 0 ? v - dv : v + dv);
+    }
+    if(p > ax.hi)      a += -_VWALL_K*(p - ax.hi) - _VWALL_C*v;
+    else if(p < ax.lo) a += -_VWALL_K*(p - ax.lo) - _VWALL_C*v;
+    v += a*h;
+    p += v*h;
+    // 硬上限（防止被连续冲量/按键推到墙外太远）：墙外最多 18%（距离轴用绝对 0.12）
+    if(isFinite(ax.hi)){
+      var span = ax === _VAX.dist ? 0.12 : (ax.hi - ax.lo) * 0.09;
+      if(p > ax.hi + span){ p = ax.hi + span; if(v > 0) v = 0; }
+      if(p < ax.lo - span){ p = ax.lo - span; if(v < 0) v = 0; }
+    }
+    ax._p = p; ax._v = v;
+  }
+  function _viewPhysics(dt, busy){
+    // 没被抓住时，目标永远跟随当前位置 —— 下次按下时弹簧从当前位姿起步，松手时也不会被旧目标拉回
+    var n = Math.max(1, Math.min(10, Math.ceil(dt / 0.008)));
+    var h = dt / n;
+    // 松手后摩擦在 0.30s 内由 0 平滑升到 1（smoothstep）：松手瞬间减速度没有阶跃，过渡丝滑。
+    // （不能用"残余弹簧继续追目标"：临界阻尼弹簧的终点是静止，会把惯性吃掉。）
+    if(_vWasBusy && !busy){
+      // 每次松手：摩擦强度与晃动的固有频率/阻尼都重新随机一次 → 每次的余势和余震都不一样
+      _vRand = 0.78 + Math.random()*0.50;
+      _WOB.wn.x = 5.4*(0.8+Math.random()*0.4); _WOB.wn.y = 4.5*(0.8+Math.random()*0.4); _WOB.wn.z = 3.3*(0.8+Math.random()*0.4);
+      _WOB.zt.x = 0.26+Math.random()*0.18; _WOB.zt.y = 0.30+Math.random()*0.18; _WOB.zt.z = 0.22+Math.random()*0.18;
+    }
+    _vWasBusy = busy;
+    if(busy) _vRelT = 0; else _vRelT = Math.min(5, _vRelT + dt);
+    var _rr = Math.min(1, _vRelT / 0.30), _sm = _rr*_rr*(3 - 2*_rr);
+    _vFric = _sm * _vRand;
+    var lgD = Math.log(viewDistance), lgT = Math.log(viewDistanceTarget);
+    var yawHome = Math.round(viewYaw / _TWO_PI) * _TWO_PI;
+    var pitchHome = Math.round(viewPitch / _TWO_PI) * _TWO_PI;
+    var pYaw = viewYaw, vYaw = viewYawVelocity, pPit = viewPitch, vPit = viewPitchVelocity;
+    var pX = viewPanX, vX = viewPanXVelocity, pY = viewPanY, vY = viewPanYVelocity;
+    var pD = lgD, vD = viewDistVelocity;
+    var home = _viewHome && !busy;
+    for(var i = 0; i < n; i++){
+      _axisStep(_VAX.yaw,   h, busy, home, yawHome,   pYaw, vYaw, viewYawTarget);   pYaw = _VAX.yaw._p;   vYaw = _VAX.yaw._v;
+      _axisStep(_VAX.pitch, h, busy, home, pitchHome, pPit, vPit, viewPitchTarget); pPit = _VAX.pitch._p; vPit = _VAX.pitch._v;
+      _axisStep(_VAX.px,    h, busy, home, 0,         pX,   vX,   viewPanXTarget);  pX   = _VAX.px._p;    vX   = _VAX.px._v;
+      _axisStep(_VAX.py,    h, busy, home, 0,         pY,   vY,   viewPanYTarget);  pY   = _VAX.py._p;    vY   = _VAX.py._v;
+      _axisStep(_VAX.dist,  h, busy, home, Math.log(520), pD, vD, lgT);             pD   = _VAX.dist._p;  vD   = _VAX.dist._v;
+    }
+    viewYaw = pYaw; viewYawVelocity = vYaw; viewPitch = pPit; viewPitchVelocity = vPit;
+    viewPanX = pX; viewPanXVelocity = vX; viewPanY = pY; viewPanYVelocity = vY;
+    viewDistance = Math.exp(pD); viewDistVelocity = vD;
+    if(home){
+      // 到位后吸附并结束复位
+      if(Math.abs(viewYaw - yawHome) < 2e-3 && Math.abs(viewPitch - pitchHome) < 2e-3 &&
+         Math.abs(viewPanX) < 0.15 && Math.abs(viewPanY) < 0.15 && Math.abs(pD - Math.log(520)) < 1e-3 &&
+         Math.abs(vYaw) + Math.abs(vPit) + Math.abs(vD) < 4e-3 && Math.abs(vX) + Math.abs(vY) < 0.6){
+        viewYaw = yawHome; viewPitch = pitchHome; viewPanX = 0; viewPanY = 0; viewDistance = 520;
+        viewYawVelocity = viewPitchVelocity = viewPanXVelocity = viewPanYVelocity = viewDistVelocity = 0;
+        _viewHome = false;
+      }
+    }
+    if(!busy){   // 没被抓住时，目标永远跟随当前位置
+      viewYawTarget = viewYaw; viewPitchTarget = viewPitch;
+      viewPanXTarget = viewPanX; viewPanYTarget = viewPanY; viewDistanceTarget = viewDistance;
+    }
+    // 机身侧倾：偏航越快，镜头越向转向的一侧倾斜（像手持/无人机转向）；俯仰越过头顶后屏幕方向反转，符号随之翻转
+    var _cp = Math.cos(viewPitch) >= 0 ? 1 : -1;
+    var bankT = _viewClamp(-viewYawVelocity * 0.018 * _cp, -0.05, 0.05) * _viewBankMul;
+    _viewBank += (bankT - _viewBank) * (1 - Math.exp(-dt * 5.5));
+  }
+  var _viewBankMul = (window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches) ? 0.3 : 1.0;
+
+  // ══════════════════════════════════════════════════════
+  // 不平衡晃动：相机 = 一个主惯量互不相等的自由刚体（航天器姿态动力学）
+  //   参考：欧拉刚体方程  I·ω̇ = −ω×(Iω) + τ。
+  //   · 真空里没有拖拽，也没有"平衡"：转动会带着角动量，指令角速度改变时，
+  //     机体对指令产生反向的惯性力矩（−I·ω̇_cmd）→ 起转/急停都会有"没跟上"和"余震"。
+  //   · 三个主惯量 Ix<Iy<Iz 互不相等，偏航恰是"中间轴"（网球拍定理 / 贾尼别科夫效应）：
+  //     绕它高速转动本身是不稳定的，微小扰动会被放大 → 看起来像轻微的翻滚晃动。
+  //   · 陀螺项 ω×(Iω) 让俯仰与偏航同时进行时，凭空产生滚转力矩（斜着甩镜头会有"拧"的感觉）；
+  //     镜头抬高后，世界"上"轴投到相机系里带上了滚转分量，偏航也会牵动滚转。
+  //   · 三个轴的固有频率不同且欠阻尼 → 晃动是几个频率的叠加，不会呈现单一正弦的"果冻感"。
+  //   · 抓取点杠杆：抓在屏幕边缘斜着拖，像拖一个球的边缘，会带来额外的滚转冲量（r×F）。
+  //   · 微推进器噪声（OU 过程）：极小幅度的随机力矩，镜头不会"绝对死静"。
+  //   所有量都是小角度（≤4°）叠加在原视角之上，不改变主视角的位置/朝向。
+  // ══════════════════════════════════════════════════════
+var _WOB = {
+  I:  { x:0.8, y:1.2, z:1.7 },          // 主惯量：俯仰轴最轻、偏航轴居中、滚转轴最重 → 偏航是"中间轴"
+  wn: { x:5.4, y:4.5, z:3.3 },          // 三轴固有频率各不相同 → 晃动不是单一正弦，永不严格重复
+  zt: { x:0.32, y:0.36, z:0.28 },       // 欠阻尼：停下后还会"余震"几下
+  gA: 0.045,                            // 惯性力增益：指令角加速度 → 晃动
+  gW: 0.05,                             // 陀螺项用的指令角速度缩放（保持小角度近似成立）
+  lim: 0.07,                            // 软限幅 ≈ 4°
+  phi:{x:0,y:0,z:0}, u:{x:0,y:0,z:0}, n:{x:0,y:0,z:0},
+  prevVy:0, prevVp:0, aY:0, aP:0, lever:0
+};
+function _randn(){ var a=0; for(var i=0;i<4;i++) a+=Math.random(); return (a-2)*1.7; }
+function _softLim(v, L){ return L*Math.tanh(v/L); }
+function _viewWobble(dt, yawV, pitchV, pitch, damp){
+  var W=_WOB, I=W.I;
+  // 指令角加速度（有限差分 + 平滑，抑制帧时间抖动）
+  var aY = (yawV - W.prevVy)/Math.max(dt,1e-3), aP = (pitchV - W.prevVp)/Math.max(dt,1e-3);
+  W.prevVy = yawV; W.prevVp = pitchV;
+  var ks = 1 - Math.exp(-dt*12);                       // 加速度滤波更慢 → 突然甩动时晃动不会"抽"一下
+  aY = 45*Math.tanh(aY/45); aP = 45*Math.tanh(aP/45);   // 软限幅：一帧内的速度突变不会产生尖峰
+  W.aY += (aY - W.aY)*ks; W.aP += (aP - W.aP)*ks;
+  // 转到相机坐标系：x=俯仰轴，y=相机上轴，z=后轴。世界"上"轴在相机系里 = (0, cosP, -sinP)
+  var cp = Math.cos(pitch), sp = Math.sin(pitch);
+  var wcx = pitchV,       wcy = yawV*cp,       wcz = -yawV*sp;
+  var acx = W.aP,         acy = W.aY*cp,       acz = -W.aY*sp;
+  // 把指令角速度/加速度缩放到小角度尺度
+  var cx = wcx*W.gW, cy = wcy*W.gW, cz = wcz*W.gW;
+  var n = Math.max(1, Math.min(8, Math.ceil(dt/0.008))), h = dt/n;
+  // 手抓取点的"杠杆"滚转冲量（按帧消耗一次）
+  // 杠杆冲量不一次性灌入，而是在 ~80ms 内逐步释放，避免鼠标事件的抖动直接变成滚转抖动
+  W.leverBuf = (W.leverBuf || 0) + W.lever; W.lever = 0;
+  var _lt = W.leverBuf * (1 - Math.exp(-dt/0.08)); W.leverBuf -= _lt; W.u.z += _lt;
+  for(var i=0;i<n;i++){
+    // OU 微扰动：微推进器 / 太阳风 —— 永远不会绝对静止，但幅度极小
+    var s = 0.0065*Math.sqrt(h), d = Math.exp(-h/1.4);
+    W.n.x = W.n.x*d + s*_randn(); W.n.y = W.n.y*d + s*_randn(); W.n.z = W.n.z*d + s*_randn();
+    // 总角速度 = 指令 + 偏差；欧拉方程的陀螺项 ω×(Iω)
+    var ox = cx + W.u.x, oy = cy + W.u.y, oz = cz + W.u.z;
+    var gx = ((I.z - I.y)/I.x) * oy*oz;
+    var gy = ((I.x - I.z)/I.y) * oz*ox;
+    var gz = ((I.y - I.x)/I.z) * ox*oy;
+    var ax = -gx - W.gA*acx - W.wn.x*W.wn.x*W.phi.x - 2*W.zt.x*W.wn.x*W.u.x + W.n.x;
+    var ay = -gy - W.gA*acy - W.wn.y*W.wn.y*W.phi.y - 2*W.zt.y*W.wn.y*W.u.y + W.n.y;
+    var az = -gz - W.gA*acz - W.wn.z*W.wn.z*W.phi.z - 2*W.zt.z*W.wn.z*W.u.z + W.n.z;
+    W.u.x += ax*h; W.u.y += ay*h; W.u.z += az*h;
+    W.phi.x += W.u.x*h; W.phi.y += W.u.y*h; W.phi.z += W.u.z*h;
+  }
+  // 软限幅：超出时同时收速度，防止长时间贴着上限
+  ['x','y','z'].forEach(function(k){
+    var l = _softLim(W.phi[k], W.lim);
+    if(Math.abs(W.phi[k]) > W.lim*0.9 && W.phi[k]*W.u[k] > 0) W.u[k] *= 0.9;
+    W.phi[k] = l;
+  });
+}
+
+  // ══════════════════════════════════════════════════════
+  // 缩放惯性晃动（dolly surge）：相机像装在一根有弹性的臂上沿视线方向推拉
+  //   · 缩放加速度（对数距离的二阶导）→ 惯性力使机体沿视线"前冲/后坐"：
+  //     起拉时落后（被甩在后面），急停时前冲，然后欠阻尼地来回几下才稳住。
+  //   · 力正比于当前距离 D：远处推拉的位移更大，符合透视下的视觉比例。
+  //   · 同时带一点点俯仰点头（前冲时略抬头），让推拉有"重量"。
+  //   · 滚轮 / 按键 / 触摸捏合 / 撞到缩放边界的回弹，全部走同一条加速度通路。
+  // ══════════════════════════════════════════════════════
+var _ZW = { s:0, v:0, a:0, prevV:0, wn:6.8, zt:0.45, gS:0.20, lim:10 };
+function _zoomWobble(dt, vD, D){
+  var Z=_ZW;
+  var a = (vD - Z.prevV)/Math.max(dt,1e-3); Z.prevV = vD;
+  Z.a += (a - Z.a)*(1 - Math.exp(-dt*14));
+  var ac = 18*Math.tanh(Z.a/18);
+  var n = Math.max(1, Math.min(8, Math.ceil(dt/0.008))), h = dt/n;
+  for(var i=0;i<n;i++){
+    var acc = -Z.gS*ac*D - Z.wn*Z.wn*Z.s - 2*Z.zt*Z.wn*Z.v;
+    Z.v += acc*h; Z.s += Z.v*h;
+  }
+  var l = Z.lim*Math.tanh(Z.s/Z.lim);
+  if(Math.abs(Z.s) > Z.lim*0.9 && Z.s*Z.v > 0) Z.v *= 0.9;
+  Z.s = l;
+}
 
   // 键盘：方向键 / WASD 环绕，Q/E 推拉，Shift+方向键平移，R 或 Home 复位
   // 双击空白处（桌面）复位视角
   var _viewKeys = {};
   function _viewResetAll(){
-    viewYawTarget = 0; viewPitchTarget = 0; viewPanXTarget = 0; viewPanYTarget = 0; viewDistanceTarget = 520;
-    viewYawVelocity = viewPitchVelocity = viewPanXVelocity = viewPanYVelocity = 0;
+    // 不再瞬间改目标：保留当前速度，让临界阻尼弹簧把镜头"拉"回原位（带一点点自然的减速收尾）
+    _viewHome = true;
   }
   if(!isTouchDev){
     window.addEventListener('keydown', function(e){
@@ -5311,6 +5970,12 @@ resetIdleTimer();
       uStrength:  { value: isMobile ? 1.65 : 2.15 },
       uSceneSize: { value: new THREE.Vector2(_bloomW, _bloomH) },
       uCATime:    { value: 0.0 },
+      uCAVel:     { value: 0.0 },   // 0..1 相机运动强度（每帧由 animate() 写入），驱动色差
+      uToneKnee:  { value: 0.85 },  // 软高光起点：低于它的亮度完全不变，越调低压缩越早介入
+      uZoom:      { value: 0.0 },                       // 0..1 飞入径向缩放模糊强度（由聚焦弹簧驱动）
+      uZoomCenter:{ value: new THREE.Vector2(0.5,0.5) },// 缩放中心：被聚焦晶体的屏幕 UV
+      // 点击涟漪（最多 2 圈）：xy = 中心 UV，z = 半径（以屏幕高度为单位），w = 强度
+      uRip:       { value: [ new THREE.Vector4(0,0,0,0), new THREE.Vector4(0,0,0,0) ] },
     },
     vertexShader: _postVS,
     fragmentShader: `
@@ -5320,7 +5985,31 @@ resetIdleTimer();
       uniform float     uStrength;
       uniform vec2      uSceneSize;
       uniform float     uCATime;
+      uniform float     uCAVel;
+      uniform float     uToneKnee;
+      uniform float     uZoom;
+      uniform vec2      uZoomCenter;
+      uniform vec4      uRip[2];
       varying vec2      vUv;
+
+      // ── 运动驱动色差：静止只留极淡底噪，运动越快分离越大 ──
+      #define CA_REST      0.0002   // 静止时的底噪（旧版固定下限是 0.0008）
+      #define CA_MOVE      0.0022   // 运动满强度时的基础分离量
+      #define CA_MOVE_VAR  0.0014   // 时间调制只叠加在"运动部分"上，让边缘有细微起伏
+
+      // ── 软高光（hue-preserving soft shoulder）──
+      // bloom 是加法叠加，亮核处 scene+bloom 的 RGB 会超过 1，之前被逐通道硬截断：
+      // 金色 (2.3,1.8,0.8) → (1,1,0.8)，R/G 先到顶，色相滑向发白的黄。
+      // 这里改成：只压缩最亮的那个通道，再让三个通道乘同一个比例 → R:G:B 比例不变 → 色相不变。
+      // knee 以下原样输出（不改变你已经调好的整体影调）；knee 以上用指数曲线平滑地逼近 1.0，
+      // 在 knee 处一阶连续，没有"折角"。
+      vec3 softShoulder(vec3 c, float knee){
+        float m = max(c.r, max(c.g, c.b));
+        if(m <= knee) return c;
+        float w  = 1.0 - knee;
+        float mp = knee + w * (1.0 - exp(-(m - knee) / w));
+        return c * (mp / m);
+      }
 
       // ── FXAA 3.11 (Timothy Lottes / NVIDIA, adapted for WebGL) ──
       // Samples 5 neighbours to detect edges via luma contrast,
@@ -5407,6 +6096,28 @@ resetIdleTimer();
       void main(){
         vec2 texelSize = 1.0 / uSceneSize;
         vec2 fromCenter = vUv - 0.5;
+        float aspect = uSceneSize.x / uSceneSize.y;
+        vec2  asp    = vec2(aspect, 1.0);
+
+        // ── 点击涟漪：折射扭曲环（UV 偏移）──
+        // 环的剖面 = 高斯的一阶导：环内侧向内推、外侧向外推，看起来像透过水波/玻璃看画面。
+        // 环宽随半径增大；没有涟漪时两个分支都跳过，零开销。
+        vec2 suv   = vUv;       // 扭曲后的采样 UV
+        vec2 ripCA = vec2(0.0); // 涟漪处的额外色散
+        for(int i = 0; i < 2; i++){
+          vec4 rp = uRip[i];
+          if(rp.w > 0.001){
+            vec2  d  = (vUv - rp.xy) * asp;
+            float r  = length(d);
+            float wd = 0.035 + 0.075 * rp.z;
+            float x  = (r - rp.z) / wd;
+            float ring = exp(-x * x);
+            vec2  dir  = (r > 1e-4) ? d / r : vec2(0.0);
+            vec2  push = dir / asp * (-x * ring) * rp.w * 0.030;
+            suv   += push;
+            ripCA += push * 0.55;
+          }
+        }
 
         // ── Chromatic aberration — 用原始 UV 空间方向，保持原逻辑不变 ──
         // 强度由多个非谐波叠加驱动，永远不规则，无明显周期感
@@ -5416,13 +6127,36 @@ resetIdleTimer();
         float ca_c = sin(uCATime * 2.13 + 0.4)     * 0.15 + 0.15;
         float ca_d = sin(uCATime * 5.77 + 3.1)     * 0.06;
         float caMod = ca_a + ca_b + ca_c + ca_d; // range ~0 .. ~1.06
-        // base 0.004, peak ~0.010 — 明显但不夸张
-        float caStrength = dist_uv * dist_uv * (0.0008 + caMod * 0.0014);
+        // 静止 ≈ 0；运动时按 uCAVel 增强，峰值约为旧版的 1.7 倍（边角约 2~3 CSS px）
+        float caStrength = dist_uv * dist_uv * (CA_REST + uCAVel * (CA_MOVE + caMod * CA_MOVE_VAR));
         vec2 caDir = (dist_uv > 0.0001) ? normalize(fromCenter) * caStrength : vec2(0.0);
-        vec4 sceneR = fxaa(uScene, vUv + caDir,         texelSize);
-        vec4 sceneG = fxaa(uScene, vUv,                 texelSize);
-        vec4 sceneB = fxaa(uScene, vUv - caDir * 0.6,   texelSize);
+        caDir += ripCA;
+        vec4 sceneR = fxaa(uScene, suv + caDir,         texelSize);
+        vec4 sceneG = fxaa(uScene, suv,                 texelSize);
+        vec4 sceneB = fxaa(uScene, suv - caDir * 0.6,   texelSize);
         vec4 scene  = vec4(sceneR.r, sceneG.g, sceneB.b, sceneG.a);
+
+        // ── 飞入径向缩放模糊（zoom blur）──
+        // 从聚焦晶体的屏幕位置向外沿径向多点平均：中心保持清晰，越靠边拖得越长。
+        // 只在镜头推拉过程中（uZoom>0）才执行这 7 个额外采样，静止时整段被分支跳过。
+        if(uZoom > 0.002){
+          vec2  zd   = suv - uZoomCenter;
+          float zr   = length(zd * asp);
+          vec3  acc  = scene.rgb;
+          float accA = scene.a;
+          float wsum = 1.0;
+          for(int i = 1; i <= 7; i++){
+            float f = float(i) / 7.0;
+            float w = 1.0 - f * 0.55;
+            vec4  sm = texture2D(uScene, suv - zd * (uZoom * 0.11 * f));
+            acc  += sm.rgb * w;
+            accA += sm.a * w;
+            wsum += w;
+          }
+          float zm = smoothstep(0.04, 0.45, zr) * min(1.0, uZoom * 1.4);
+          scene.rgb = mix(scene.rgb, acc / wsum, zm);
+          scene.a   = mix(scene.a,   accA / wsum, zm);
+        }
 
         // ── Vignette 终极正圆修复 ──
         // fromCenter 是 UV 空间偏移（[-0.5,0.5]²）。
@@ -5433,7 +6167,6 @@ resetIdleTimer();
         // 用屏幕高度的一半（uSceneSize.y * 0.5）归一化，
         // 使 Y 轴 ±1 = 屏幕上下边缘，X 轴因为宽高比会 > 1。
         // 然后用 length 算像素空间的圆形距离，这在屏幕上是真正的正圆。
-        float aspect = uSceneSize.x / uSceneSize.y;
         // 像素空间距离（以屏幕半高为单位：1.0 = 从中心到上/下边缘）
         float dist_px = length(vec2(fromCenter.x * aspect, fromCenter.y)) * 2.0;
         // dist_px: 中心=0, 上/下边缘中点=1.0, 左/右边缘中点=1.0, 角落=sqrt(1+AR²)/1
@@ -5441,11 +6174,14 @@ resetIdleTimer();
         float vignette = 1.0 - smoothstep(0.85, 1.7, dist_px);
 
         // bloom added before vignette — so bright areas still bleed through corners
-        vec3 bloom = texture2D(uBloom, vUv).rgb;
-        vec3 col = scene.rgb + bloom * uStrength;
+        vec3 bloom = texture2D(uBloom, suv).rgb;
+        vec3 col = scene.rgb + bloom * uStrength * (1.0 + uZoom * 0.25);   // 飞入时泛光略增强，速度感更足
 
         // Apply vignette — clamp minimum at 0.55 so corners never go fully black
         col *= max(vignette, 0.62);
+
+        // 软高光放在暗角之后：暗角对 <1 的区域行为与原来完全一致，只处理原本会被截断的过曝部分
+        col = softShoulder(col, uToneKnee);
 
         // 【修复】WebGL 画布默认是 premultipliedAlpha：要求 rgb <= alpha。
         // 原先 alpha=scene.a（空白处为0）而 rgb 含泛光(>0)，属于非法的预乘颜色，
@@ -5541,6 +6277,19 @@ resetIdleTimer();
   var REPEL_RADIUS = 15, REPEL_FORCE = 1200, DAMPING = 0.945, RETURN_FORCE = 0.0008;
   var _conAlpha  = 0;
 
+  // ── 运动驱动色差：状态（只分配一次，循环内零分配）──
+  // 速度 = (本帧转角 + 0.6×本帧平移/默认机位距离 520) / dt，单位约为 rad/s。
+  // 死区 CA_DEAD 以下视为静止——镜头自带的手持晃动峰值约 0.03 rad/s，必须落在死区内，
+  // 否则"静止"时色差会跟着晃动呼吸。CA_FULL 为满强度对应的速度。
+  // 这两个数是按代码估算的，实际手感可在控制台看 window._caSpeed（原始速度）和 window._caVel 后微调。
+  var CA_DEAD = 0.08, CA_FULL = 1.6;
+  var CA_TAU_UP = 0.07, CA_TAU_DOWN = 0.30;   // 起势快、收势慢（秒）：甩一下后色差会有个拖尾
+  var _caVel = 0, _caInit = false;
+  var _zoomK = 0, _zcV = new THREE.Vector3();   // zoom blur 当前强度 / 缩放中心投影缓存
+  var _caPrevQ = new THREE.Quaternion();
+  var _caPrevP = new THREE.Vector3();
+  var _caReduce = (window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches) ? 0.3 : 1.0;
+
   function animate(){
     requestAnimationFrame(animate);
     // getDelta() returns time since last call; cap at 80ms so a long hidden period
@@ -5574,36 +6323,29 @@ resetIdleTimer();
       var _ky = (_viewKeys.arrowup||_viewKeys.w ? 1 : 0) - (_viewKeys.arrowdown||_viewKeys.s ? 1 : 0);
       var _kz = (_viewKeys.e ? 1 : 0) - (_viewKeys.q ? 1 : 0);
       if(_kx || _ky || _kz){
+        // 按键 = 施加力（角加速度 / 加速度），不是直接位移：起步有加速过程，松键后靠阻尼滑停
+        _viewHome = false;
         if(_viewKeys.shift){
-          viewPanXTarget = _viewClamp(viewPanXTarget + _kx*160*_dt, -VIEW_PAN_X, VIEW_PAN_X);
-          viewPanYTarget = _viewClamp(viewPanYTarget + _ky*160*_dt, -VIEW_PAN_Y, VIEW_PAN_Y);
+          viewPanXVelocity += _kx*430*_dt;
+          viewPanYVelocity += _ky*430*_dt;
         } else {
-          viewYawTarget   = (viewYawTarget   + _kx*1.3*_dt);
-          viewPitchTarget = (viewPitchTarget - _ky*1.0*_dt);
+          viewYawVelocity   += _kx*3.0*_dt;
+          viewPitchVelocity -= _ky*2.4*_dt;
         }
-        viewDistanceTarget = _viewClamp(viewDistanceTarget + _kz*320*_dt, VIEW_DIST_MIN, VIEW_DIST_MAX);
+        viewDistVelocity = _viewClamp(viewDistVelocity + _kz*2.0*_dt, -3.2, 3.2);
       }
     }
     if(panelOpen || focusE > 0.0004){
       // 冻结在当前视角：目标 = 当前值、速度清零。聚焦镜头以它为起点，关闭面板后也退回到它。
       viewYawTarget = viewYaw; viewPitchTarget = viewPitch;
       viewPanXTarget = viewPanX; viewPanYTarget = viewPanY; viewDistanceTarget = viewDistance;
-      viewYawVelocity = viewPitchVelocity = viewPanXVelocity = viewPanYVelocity = 0;
-    } else if(!_viewBusy){
-      viewYawTarget = (viewYawTarget + viewYawVelocity * _dt);
-      viewPitchTarget = (viewPitchTarget + viewPitchVelocity * _dt);
-      viewPanXTarget = _viewClamp(viewPanXTarget + viewPanXVelocity * _dt, -VIEW_PAN_X, VIEW_PAN_X);
-      viewPanYTarget = _viewClamp(viewPanYTarget + viewPanYVelocity * _dt, -VIEW_PAN_Y, VIEW_PAN_Y);
-      var _iv = Math.exp(-_dt * 2.6);
-      viewYawVelocity *= _iv; viewPitchVelocity *= _iv;
-      viewPanXVelocity *= _iv; viewPanYVelocity *= _iv;
+      viewYawVelocity = viewPitchVelocity = viewPanXVelocity = viewPanYVelocity = viewDistVelocity = 0;
+      _viewHome = false;
+    } else {
+      _viewPhysics(_dt, _viewBusy);
     }
-    var _viewLerp = 1 - Math.exp(-_dt * (_viewBusy ? 13.0 : 6.4));
-    viewYaw   += (viewYawTarget   - viewYaw)   * _viewLerp;
-    viewPitch += (viewPitchTarget - viewPitch) * _viewLerp;
-    viewPanX  += (viewPanXTarget  - viewPanX)  * _viewLerp;
-    viewPanY  += (viewPanYTarget  - viewPanY)  * _viewLerp;
-    viewDistance += (viewDistanceTarget - viewDistance) * (1 - Math.exp(-_dt*5.2));
+    _viewWobble(_dt, viewYawVelocity, viewPitchVelocity, viewPitch);
+    _zoomWobble(_dt, viewDistVelocity, viewDistance);
     // 偏航角无限制累加 → 折回 [-π, π]，视角与目标同步平移，画面不受影响
     while(viewYaw >  Math.PI){ viewYaw -= Math.PI*2; viewYawTarget -= Math.PI*2; }
     while(viewYaw < -Math.PI){ viewYaw += Math.PI*2; viewYawTarget += Math.PI*2; }
@@ -5700,7 +6442,18 @@ resetIdleTimer();
       camera.position.set(_vpX, _vpY, _vpZ);
       camera.up.set(_viewUpX, _viewUpY, _viewUpZ);
       camera.lookAt(_viewTargetX, _viewTargetY, 0);
+      camera.rotateZ(_viewBank);                     // 转向侧倾（focusE≈0 才会走到这里，与聚焦滚转互不叠加）
       if(focusE === 0 && focusW === 0) focusCr = focusGoal ? focusCr : null;
+    }
+
+    // ── 不平衡晃动：叠加到最终姿态（聚焦镜头时淡出，避免和构图旋转打架）──
+    var _wobK = (1 - focusE) * _viewBankMul;
+    if(_wobK > 0.001){
+      camera.rotateX(_WOB.phi.x * _wobK);
+      camera.rotateY(_WOB.phi.y * _wobK);
+      camera.rotateZ(_WOB.phi.z * _wobK);
+      camera.rotateX(_ZW.s * 0.0010 * _wobK);        // 缩放前冲时轻微点头
+      camera.translateZ(_ZW.s * _wobK);              // 沿视线的前冲/后坐
     }
 
     // ── Organic camera sway — three-layer handheld model ──
@@ -5877,9 +6630,8 @@ resetIdleTimer();
       cr.lerpIn = Math.min(1, cr.lerpIn + 0.045);
 
       var rs = (1-cr.hoverT*.7) * panelSlowT;
-      cr.group.rotation.x += cr.rotSpeed.x * rs * _dt * 60;
-      cr.group.rotation.y += cr.rotSpeed.y * rs * _dt * 60;
-      cr.group.rotation.z += cr.rotSpeed.z * rs * _dt * 60;
+      if(!cr.rb) cr.rb = _rbMake(cr.mesh.geometry, { w:[cr.rotSpeed.x*60, cr.rotSpeed.y*60, cr.rotSpeed.z*60] });
+      _rbStep(cr.group, cr.rb, _dt * rs);
 
       var floatOffset = Math.sin(t*.4 + cr.floatPh) * cr.floatAmp * panelSlowT;
 
@@ -5938,6 +6690,13 @@ resetIdleTimer();
         // Outside active zone (corner crystal or panel open): decay to zero
         cr.magOx *= 0.88;
         cr.magOy *= 0.88;
+      }
+
+      // ── 宇宙环境：波 / 星风 / 微流星体 对主晶体位置与轴向的影响 ──
+      if(window._crystalCosmos){
+        var _ccm = window._crystalCosmos(cr, _dt, t, panelSlowT * (1 - Math.min(1, focusE*1.2)));
+        var _chm = 1 - 0.85*cr.hoverT;                         // 指向它时压低，保证好点
+        targX += _ccm.x*_chm; targY += _ccm.y*_chm; targZ += _ccm.z*_chm;
       }
 
       // Corner crystals: always direct assign — they track camCx/camCy every frame anyway,
@@ -6056,6 +6815,21 @@ resetIdleTimer();
     });
 
     // ── Mini crystal physics ──
+    if(window._miniDragTick) window._miniDragTick();   // 被抓住的石头：每帧按最新相机位姿贴回指针下
+    if(window._miniFlowTick) window._miniFlowTick(_dt);
+    if(window._miniWindTick) window._miniWindTick(_dt);
+    var _W = window._miniWave ? window._miniWave() : null;
+    var _f60 = Math.min(_dt * 60, 3);
+    // 大晶体的软化引力源（每帧收集一次）
+    var _gc = [];
+    crystals.forEach(function(cr){
+      if(cr.introT < 1 || !cr.group.visible) return;
+      var gp = cr.group.position, eps = cr.scale * 0.6;
+      _gc.push({ x:gp.x, y:gp.y, z:gp.z,
+                 GM: 6000 * Math.pow(cr.scale/40, 1.3),            // 质量随尺寸增长，但不线性放大，免得角落大石头太霸道
+                 e2: eps*eps, Rc: Math.min(cr.scale*7, 320) });
+    });
+    var _gk = _dt / 60;                                           // u/s² → 每帧速度单位（见 _f60）     // 以 60Hz 为基准的时间步比例：120/144Hz 屏幕上速度与 60Hz 一致
     minis.forEach(function(m,i){
       if(m.dragging) return;
 
@@ -6068,38 +6842,85 @@ resetIdleTimer();
 
       if(dist < REPEL_RADIUS){
         var strength = REPEL_FORCE / (dist2+400);
-        m.vx += (dx/dist)*strength;
-        m.vy += (dy/dist)*strength;
-        m.vz += (_dzm/dist)*strength*0.5;
-        m.pulseT = Math.min(m.pulseT+0.025, 1.0);
+        m.vx += (dx/dist)*strength*_f60;
+        m.vy += (dy/dist)*strength*_f60;
+        m.vz += (_dzm/dist)*strength*0.5*_f60;
+        m.pulseT = Math.min(m.pulseT+0.025*_f60, 1.0);
       } else {
-        m.pulseT = Math.max(m.pulseT-0.012, 0.0);
+        m.pulseT = Math.max(m.pulseT-0.012*_f60, 0.0);
       }
 
       if(m.isDrifter){
-        m.vx *= 0.9995;
-        m.vy *= 0.9995;
-        m.vz *= 0.9995;
-        m.group.position.x += m.vx;
-        m.group.position.y += m.vy;
-        m.group.position.z += m.vz;
+        var _dmp = Math.pow(0.9995, _f60);
+        m.vx *= _dmp;
+        m.vy *= _dmp;
+        m.vz *= _dmp;
 
-        // Organic bobbing — offset from current drift position, not cumulative
-        m.group.position.x += Math.sin(t * m.floatFx + m.floatPhX) * m.floatAxX * 0.06;
-        m.group.position.y += Math.sin(t * m.floatFy + m.floatPhY) * m.floatAxY * 0.05;
-
-        // 冒出 / 入场缩放（3D 出生动画）
-        if(m.spawnT !== undefined && m.spawnT < 1){
-          m.spawnT = Math.min(1, m.spawnT + _dt / (m.spawnDur || 1));
-          var _e = m.spawnT; _e = _e*_e*(3-2*_e);
-          m.group.scale.setScalar(Math.max(0.001, _e));
+        // 气体拖曳（Epstein）：a = (v_wind − v)/t_stop。波前陡（前方衰减快）、尾部拖长；小石头 t_stop 短、被吹得更猛
+        if(_W){
+          var _q = ((m.group.position.x*_W.dir.x + m.group.position.y*_W.dir.y + m.group.position.z*_W.dir.z) - _W.front) / _W.width;
+          if(_q > -3 && _q < 3){
+            var _env = _q > 0 ? Math.exp(-_q*_q*3.0) : Math.exp(-_q*_q*0.6);
+            var _ts  = 0.8 + (m.scale-2.5)*0.35;
+            var _kd  = (1 - Math.exp(-_dt/_ts)) * _env;
+            m.vx += (_W.dir.x*_W.wind - m.vx) * _kd;
+            m.vy += (_W.dir.y*_W.wind - m.vy) * _kd;
+            m.vz += (_W.dir.z*_W.wind - m.vz) * _kd;
+            _rbTorque(m.group, m.rb, _W.dir, 0.35 * Math.min(2.5, 4.5/m.scale) * _env, _dt);   // 拖曳力矩 τ = r_cp × F
+            m.pulseT = Math.max(m.pulseT, Math.min(0.5, _env*0.5));                         // 波扫过时微微发亮
+          }
         }
-        // 出界：离开整个 3D 球形空间（而不是 XY 方框）
+        // 引力偏折：Plummer 软化  a = GM·r / (r² + ε²)^{3/2}，再乘 (1 − r/Rc)² 的平滑截断。
+        // 软化 → 近距离不会数值爆炸；截断 → 势井深度有限，从外面飞来的石头不会被“永远捕获”。
+        // 径向力仍是保守力：慢石头会被明显弯折，快石头只轻微偏转（引力聚焦），掠过时还能“甩”一下。
+        if(_gc.length){
+          var _gax = 0, _gay = 0, _gaz = 0, _gp = m.group.position;
+          for(var _gi = 0; _gi < _gc.length; _gi++){
+            var _g = _gc[_gi];
+            var _rx = _g.x - _gp.x, _ry = _g.y - _gp.y, _rz = _g.z - _gp.z;
+            var _r2 = _rx*_rx + _ry*_ry + _rz*_rz;
+            if(_r2 >= _g.Rc*_g.Rc) continue;
+            var _rr = Math.sqrt(_r2), _tp = 1 - _rr/_g.Rc;
+            var _den = _r2 + _g.e2;
+            var _ga = _g.GM * _tp * _tp / (_den * Math.sqrt(_den));
+            _gax += _rx*_ga; _gay += _ry*_ga; _gaz += _rz*_ga;
+          }
+          var _gm = Math.sqrt(_gax*_gax + _gay*_gay + _gaz*_gaz);
+          if(_gm > 1.5){ var _gs = 1.5/_gm; _gax *= _gs; _gay *= _gs; _gaz *= _gs; }   // 加速度上限 1.5 u/s²
+          m.vx += _gax * _gk; m.vy += _gay * _gk; m.vz += _gaz * _gk;     // Δv(每帧单位) = a·dt/60
+        }
+        // 速度软上限，避免多次波叠加后越吹越快
+        var _sp2 = m.vx*m.vx + m.vy*m.vy + m.vz*m.vz;
+        if(_sp2 > 1.8){ var _lim = Math.pow(0.985, _f60); m.vx *= _lim; m.vy *= _lim; m.vz *= _lim; }
+
+        // 真空中没有浮力：纯惯性飞行（受力只来自波、鼠标、碰撞），不再叠加正弦晃动
+        m.group.position.x += m.vx * _f60;
+        m.group.position.y += m.vy * _f60;
+        m.group.position.z += m.vz * _f60;
+
+        // 到达碎裂点：母体碎成幂律碎片
+        if(m.breakAt){
+          var _b = m.breakAt;
+          if((_b.x-m.group.position.x)*m.vx + (_b.y-m.group.position.y)*m.vy + (_b.z-m.group.position.z)*m.vz <= 0){
+            m.breakAt = null;
+            if(window._miniFragment) window._miniFragment(m);
+          }
+        }
+
+        // 尺寸平滑趋近目标（入场长大 / 碎裂后母体变小 / 碎片从母体里“长”出来）
+        var _kt = (m.sizeK === undefined) ? 1 : m.sizeK;
+        if(m._k === undefined) m._k = _kt;
+        m._k += (_kt - m._k) * Math.min(1, _dt * (m.growRate || 3));
+        m.group.scale.setScalar(Math.max(0.001, m._k));
+
+        // 离场：已飞出外层球壳并仍在远离 → 回收；极远处兜底回收
         var _p = m.group.position;
-        var _lim = _miniShellR() * 1.35;
-        if(_p.x*_p.x + _p.y*_p.y*1.3 + _p.z*_p.z > _lim*_lim){
+        var _R = _miniShellR();
+        var _d2 = _p.x*_p.x + _p.y*_p.y + _p.z*_p.z;
+        if((_d2 > _R*_R && (_p.x*m.vx + _p.y*m.vy + _p.z*m.vz) > 0) || _d2 > _R*_R*7.8){
           m.alive = false;
           m.group.visible = false;
+          m.breakAt = null;
         }
       } else {
         // Anchored — spring return + organic bobbing
@@ -6119,14 +6940,13 @@ resetIdleTimer();
       }
 
       // Rotation — all minis rotate
-      m.group.rotation.x += m.rotSpeed.x * _dt * 60;
-      m.group.rotation.y += m.rotSpeed.y * _dt * 60;
-      m.group.rotation.z += m.rotSpeed.z * _dt * 60;
+      _rbStep(m.group, m.rb, _dt);      // 欧拉方程：角动量守恒的自由自转 / 翻滚
 
       // Shader update
       m.mat.uniforms.uTime.value  = t;
       m.mat.uniforms.uPulse.value = m.pulseT;
       m.emat.uniforms.uPulse.value= m.pulseT;
+      _glintStep(m, _dt, t);
     });
 
     // Flyby stones removed.
@@ -6215,6 +7035,8 @@ if(idleDriftSpeed > 0.000005){
     (function(){
       camera.updateMatrixWorld(true);
       var inv = camera.matrixWorldInverse;
+      _sunUni.key.value.copy(_SUN_KEY_W).transformDirection(inv);   // 世界光 → 视图空间
+      _sunUni.rim.value.copy(_SUN_RIM_W).transformDirection(inv);
       var f0 = (H*0.5) / Math.tan(27.5*Math.PI/180);                 // 默认 FOV 55° 的焦距(px)
       var f  = (H*0.5) / Math.tan(camera.fov*0.5*Math.PI/180);       // 当前焦距（含 FOV 呼吸/聚焦收窄）
       var cx = CW*0.5 - CANVAS_OVERHANG*0.5, cy = H*0.5;             // three 画布比视口宽 8vw，左右各挂 4vw
@@ -6259,23 +7081,23 @@ if(idleDriftSpeed > 0.000005){
       // 星球 = 世界坐标里的真实天体：固定在默认机位(0,0,520)沿默认视线前方 3000 处。
       // 相机环绕 / 平移 / 推拉时它有真实的视差与远近缩放；转到背对它时它在相机身后（不绘制），
       // 但它的方向与强度仍写入 _planetLight，晶体与天空照样被它的光照亮。
-      var _plD = 3000;
+      // 星球 = 无穷远天体：只取方向、不取距离。相机推拉 / 平移 / 靠近都不会改变它的大小和屏幕位置，
+      // 只有镜头“转向”（环绕、俯仰、滚转、晃动）才会让它在画面里移动，大小只跟镜头焦距(FOV)走 → 稳固，不再像贴纸。
       window._bgProject = function(px0, py0, Zn){
         var rx0 = (px0 - cx)/f0, ry0 = -(py0 - cy)/f0;
         var il = 1/Math.sqrt(rx0*rx0 + ry0*ry0 + 1);
-        v.set(rx0*il*_plD, ry0*il*_plD, 520 - il*_plD).applyMatrix4(inv);   // 世界 → 相机坐标
-        var dist = Math.sqrt(v.x*v.x + v.y*v.y + v.z*v.z) || 1;
-        var dxn = v.x/dist, dyn = v.y/dist, dzn = v.z/dist;
-        var I = Math.max(0.6, Math.min(1.5, Math.pow(_plD/dist, 1.4)));
+        v.set(rx0*il, ry0*il, -il).transformDirection(inv);   // 世界方向 → 相机方向（只旋转，不平移）
+        var dxn = v.x, dyn = v.y, dzn = v.z;
+        var I = 1;
         _planetLight.dir.value.set(dxn, dyn, dzn);
         _planetLight.I.value = I;
         var depth = -v.z;
-        if(depth < 1) return {x:cx, y:cy, s:0, dx:dxn, dy:dyn, dz:dzn, I:I};     // 在相机身后
-        var sc = (_plD*il/depth) * (f/f0);
+        if(depth < 0.05) return {x:cx, y:cy, s:0, dx:dxn, dy:dyn, dz:dzn, I:I};     // 在相机身后 / 侧后方
+        var sc = f/f0;                                          // 大小恒定：与相机位置、屏幕位置都无关
         var lim = Math.max(W,H)*6;
         var sx = Math.max(-lim, Math.min(lim, cx + f*v.x/depth));
         var sy = Math.max(-lim, Math.min(lim, cy - f*v.y/depth));
-        return { x:sx, y:sy, s:Math.min(sc,3), dx:dxn, dy:dyn, dz:dzn, I:I };
+        return { x:sx, y:sy, s:sc, dx:dxn, dy:dyn, dz:dzn, I:I };
       };
       window._bgExternal = true;
       if(window._bgDraw) window._bgDraw();
@@ -6283,6 +7105,45 @@ if(idleDriftSpeed > 0.000005){
 
     // ── Panel content parallax — merged into main loop, zero extra rAF cost ──
     _plxTick();
+
+    // ── 色差强度：由相机本帧转动/平移速度驱动（此时相机位姿已最终确定）──
+    if(_dt > 1e-4){
+      var _caAng = 2 * Math.acos(Math.min(1, Math.abs(_caPrevQ.dot(camera.quaternion))));
+      var _caMv  = camera.position.distanceTo(_caPrevP) / 520;
+      var _caSpd = _caInit ? (_caAng + _caMv * 0.6) / _dt : 0;   // 首帧没有"上一帧"，按静止处理
+      _caPrevQ.copy(camera.quaternion);
+      _caPrevP.copy(camera.position);
+      _caInit = true;
+      var _caX = Math.min(1, Math.max(0, (_caSpd - CA_DEAD) / (CA_FULL - CA_DEAD)));
+      var _caTarget = _caX * _caX * (3 - 2 * _caX);                // smoothstep：死区边缘平滑起步
+      var _caTau = _caTarget > _caVel ? CA_TAU_UP : CA_TAU_DOWN;
+      _caVel += (_caTarget - _caVel) * (1 - Math.exp(-_dt / _caTau)); // 与帧率无关的指数平滑
+      window._caSpeed = _caSpd; window._caVel = _caVel;            // 调试用
+    }
+    _matComposite.uniforms.uCAVel.value = _caVel * _caReduce;
+
+    // ── 飞入缩放模糊：强度跟聚焦弹簧速度走（起步快、到位自然收掉）；进入满强度，退出 55% ──
+    var _zT = Math.min(1, Math.abs(focusVel) * 1.4) * (focusVel > 0 ? 1.0 : 0.55) * _caReduce;
+    _zoomK += (_zT - _zoomK) * (1 - Math.exp(-_dt * (_zT > _zoomK ? 22 : 9)));
+    if(_zoomK < 0.003) _zoomK = 0;
+    _matComposite.uniforms.uZoom.value = _zoomK;
+    if(_zoomK > 0 && focusCr){
+      focusCr.group.getWorldPosition(_zcV);
+      _zcV.project(camera);
+      _matComposite.uniforms.uZoomCenter.value.set(_zcV.x * 0.5 + 0.5, _zcV.y * 0.5 + 0.5);
+    }
+
+    // ── 点击涟漪：直接读取 shockWaves（星空层已在推进半径），取最新两圈 ──
+    var _sw = window._sceneState.shockWaves, _rp = _matComposite.uniforms.uRip.value;
+    for(var _ri = 0; _ri < 2; _ri++){
+      var _w = _sw[_sw.length - 1 - _ri], _v4 = _rp[_ri];
+      if(!_w){ _v4.w = 0; continue; }
+      var _pg = _w.radius / _w.maxRadius;                           // 0→1 生命周期
+      var _in = Math.min(1, _w.radius / 36);                        // 起步 ~2.5 帧淡入，避免首帧一个硬圈
+      var _fa = Math.pow(1 - _pg, 1.6);                             // 越扩散越弱
+      _v4.set((_w.x + CANVAS_OVERHANG*0.5) / CW, 1 - _w.y / H, _w.radius / H,
+              _w.strength * _in * _fa * _caReduce);
+    }
 
     // ── Bloom pipeline — 7 passes, Dual Kawase ──
     _matComposite.uniforms.uCATime.value = t;
