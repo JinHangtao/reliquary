@@ -365,8 +365,7 @@ body.panel-open #three { transform:translateX(-3.5vw); }
 
 .panel-bg {
   position:absolute; inset:0;
-  background:rgba(4,3,2,.55);
-  backdrop-filter:blur(2px) saturate(.6);
+  background:rgba(4,3,2,.6);
   opacity:0; transition:opacity .52s cubic-bezier(.4,0,.2,1);
 }
 #panel.on .panel-bg { opacity:1; }
@@ -375,9 +374,7 @@ body.panel-open #three { transform:translateX(-3.5vw); }
   position:absolute; top:0; right:0; bottom:0;
   width:clamp(520px,72vw,1100px);
   overflow-y:auto;
-  background:linear-gradient(175deg,rgba(18,17,15,.82) 0%,rgba(10,9,8,.88) 100%);
-  backdrop-filter:blur(28px) saturate(1.15) brightness(.92);
-  -webkit-backdrop-filter:blur(28px) saturate(1.15) brightness(.92);
+  background:linear-gradient(175deg,rgba(18,17,15,.94) 0%,rgba(10,9,8,.96) 100%);
   border-left:1px solid rgba(196,154,82,.10);
   box-shadow:-60px 0 120px rgba(0,0,0,.6);
   transform:translateX(102%);
@@ -398,9 +395,7 @@ body.panel-open #three { transform:translateX(-3.5vw); }
 .panel-head {
   position:sticky; top:0; z-index:2;
   padding:40px 44px 0;
-  background:rgba(14,13,12,.84);
-  backdrop-filter:blur(28px);
-  -webkit-backdrop-filter:blur(28px);
+  background:rgba(14,13,12,.96);
   transition:padding .4s cubic-bezier(.4,0,.2,1);
 }
 .panel-head.scrolled { padding:18px 44px 0; }
@@ -3557,7 +3552,7 @@ window._sceneState = {
     // youtube → TOP, before any text
     if(sec.youtube){
       html += '<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;margin-bottom:20px">'
-        + '<iframe src="'+esc(sec.youtube)+'" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>'
+        + '<iframe data-src="'+esc(sec.youtube)+'" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>'
         + '</div>';
     }
 
@@ -3802,6 +3797,16 @@ window._sceneState = {
     }
 
     panelBody.innerHTML = html;
+    // iframe 会拉起新进程+网络请求，放在镜头/面板动画结束后再加载
+    var _ifr = panelBody.querySelectorAll('iframe[data-src]');
+    if(_ifr.length){
+      setTimeout(function(){
+        if(!panelOpen) return;
+        for(var _ii=0; _ii<_ifr.length; _ii++){
+          if(_ifr[_ii].isConnected) _ifr[_ii].src = _ifr[_ii].getAttribute('data-src');
+        }
+      }, 900);
+    }
     _bindCollapseButtons(panelBody);
     _bindStatCards(panelBody);
     _bindImageCaps(panelBody);
@@ -4608,6 +4613,7 @@ window._sceneState = {
   // 点击石头：相机沿一条弧线绕石头小幅环绕 + 推近，镜头略收窄、轻微滚转，
   // 并把石头构图在面板之外的可见区域。关闭面板后沿原路平滑退回。
   // 用临界阻尼弹簧驱动（无过冲、可被打断），再叠一层 smoothstep 让起步更柔。
+  var _focusGrace=0, _dtS=1/60, _pinT=0, _pinW=0, _pinH=0;
   var focusCr=null, focusGoal=0, focusW=0, focusVel=0, focusE=0, focusSnap=false, _fYawSign=1;
   var _fPos=new THREE.Vector3(), _fv=new THREE.Vector3(), _fd=new THREE.Vector3();
   var _ff=new THREE.Vector3(),  _rt=new THREE.Vector3(), _fUp=new THREE.Vector3(0,1,0);
@@ -4618,6 +4624,7 @@ window._sceneState = {
     if(!focusCr || focusW < 0.002) focusSnap = true;    // 从静止开始：锁定起点
     focusCr = cr;
     focusGoal = 1;
+    _focusGrace = 4;   // 点击帧里 openPanel 会产生长帧：接下来几帧用固定步长，避免镜头被“甩”一下
     // 角落石头的名字原本是固定 CSS：聚焦开始前量一次静止位置，之后在静止位与石头下方之间混合
     if(cr.isCorner){
       var _le = labelEls[crystals.indexOf(cr)];
@@ -5129,10 +5136,14 @@ resetIdleTimer();
     camCx += (camTx-camCx)*.04;
     camCy += (camTy-camCy)*.04;
     // ── Focus spring ──
+    // 镜头专用 dt：限幅到 1/30 + 指数平滑，帧时间抖动/偶发长帧不会直接传到镜头位移上
+    var _dtF = Math.min(_dt, 1/30);
+    if(_focusGrace > 0){ _focusGrace--; _dtF = 1/60; _dtS = 1/60; }
+    else { _dtS += (_dtF - _dtS) * 0.25; _dtF = _dtS; }
     var _fg = (panelOpen && focusGoal === 1 && focusCr) ? 1 : 0;
     var _fo = _fg ? 4.0 : 4.8;                       // 进入稍慢、退出稍快
-    focusVel += (-_fo*_fo*(focusW - _fg) - 2*_fo*focusVel) * _dt;
-    focusW   += focusVel * _dt;
+    focusVel += (-_fo*_fo*(focusW - _fg) - 2*_fo*focusVel) * _dtF;
+    focusW   += focusVel * _dtF;
     if(focusW < 0){ focusW = 0; focusVel = 0; }
     if(focusW > 1.02) focusW = 1.02;
     if(!_fg && focusW < 0.0004 && Math.abs(focusVel) < 0.001){ focusW = 0; focusVel = 0; }
@@ -5142,7 +5153,7 @@ resetIdleTimer();
     if(focusE > 0.0004 && focusCr){
       focusCr.group.getWorldPosition(_fv);
       if(focusSnap){ _fPos.copy(_fv); _fYawSign = _fv.x >= 0 ? 1 : -1; focusSnap = false; }
-      else _fPos.lerp(_fv, 1 - Math.exp(-_dt*6));     // 跟随漂浮的石头，带一点延迟
+      else _fPos.lerp(_fv, 1 - Math.exp(-_dtF*6));     // 跟随漂浮的石头，带一点延迟
 
       var _bx = camCx, _by = -camCy, _bz = 520;
       _fd.set(_bx - _fPos.x, _by - _fPos.y, _bz - _fPos.z);
@@ -5152,8 +5163,10 @@ resetIdleTimer();
       var _vis  = 0;                                  // 触屏：面板之外真正可见的区域尺寸(px)
       if(isTouchDev){
         var _pin = _panelInnerEl || (_panelInnerEl = document.querySelector('.panel-inner'));
-        if(isMobile) _vis = Math.max(48, H - (_pin ? _pin.offsetHeight : H*0.91));        // 底部抽屉：只剩顶部一条
-        else         _vis = Math.max(120, W - (_pin ? _pin.offsetWidth  : W*0.72));       // 平板侧栏：只剩左边一列
+        var _nowMs = performance.now();
+        if(_pin && (_nowMs - _pinT > 250 || !_pinH)){ _pinT = _nowMs; _pinH = _pin.offsetHeight; _pinW = _pin.offsetWidth; }   // 缓存，避免逐帧强制布局
+        if(isMobile) _vis = Math.max(48, H - (_pin ? _pinH : H*0.91));        // 底部抽屉：只剩顶部一条
+        else         _vis = Math.max(120, W - (_pin ? _pinW : W*0.72));       // 平板侧栏：只剩左边一列
         // 推近后石头不能比可见区域还大：按石头在屏幕上的直径限制推近量
         var _d0 = focusCr.scale * 2 * (H / 540);
         var _kMin = Math.min(1, _d0 / (_vis * 0.8));
@@ -5192,8 +5205,8 @@ resetIdleTimer();
         _ly -= _rt.y*_tnx*_halfW + _cu.y*_tny*_halfH;
         _lz -= _rt.z*_tnx*_halfW + _cu.z*_tny*_halfH;
       } else {
-        var _pw = Math.min(1100, Math.max(520, window.innerWidth*0.72));
-        var _pf = Math.min(0.9, _pw / window.innerWidth);
+        var _pw = Math.min(1100, Math.max(520, W*0.72));
+        var _pf = Math.min(0.9, _pw / W);
         _lx += _rt.x * _halfW * 0.5 * _pf;
         _ly += _rt.y * _halfW * 0.5 * _pf;
         _lz += _rt.z * _halfW * 0.5 * _pf;
