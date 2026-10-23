@@ -276,7 +276,7 @@ body.hovering #cur-r { border-color:rgba(196,154,82,.65); }
    right-corner crystal is never clipped when the scene shifts left on panel-open.
    margin-left:-4vw centres the oversized canvas; the extra right portion acts as
    a hidden buffer — the corner crystal lives there safely, WebGL never clips it. */
-#three { position:fixed;top:0;left:0;z-index:1;pointer-events:none;will-change:transform;transition:transform 1.6s cubic-bezier(.4,0,.1,1), filter 1.6s cubic-bezier(.4,0,.2,1);margin-left:-4vw; }
+#three { position:fixed;top:0;left:0;z-index:1;pointer-events:none;touch-action:none;will-change:transform;transition:transform 1.6s cubic-bezier(.4,0,.1,1), filter 1.6s cubic-bezier(.4,0,.2,1);margin-left:-4vw; }
 
 /* scene shifts left when panel is open — 3.5vw shift is now fully inside the 4vw buffer */
 body.panel-open #three { transform:translateX(-3.5vw); }
@@ -338,6 +338,7 @@ body.panel-open #three { transform:translateX(-3.5vw); }
   pointer-events:none;
 }
 #hint.in { opacity:1; }
+.view-dragging #hint { opacity:.14; }
 .hint-txt {
   font-family:'Jost',sans-serif; font-weight:300;
   font-size:.5rem; letter-spacing:.36em;
@@ -365,7 +366,8 @@ body.panel-open #three { transform:translateX(-3.5vw); }
 
 .panel-bg {
   position:absolute; inset:0;
-  background:rgba(4,3,2,.6);
+  background:rgba(4,3,2,.55);
+  backdrop-filter:blur(2px) saturate(.6);
   opacity:0; transition:opacity .52s cubic-bezier(.4,0,.2,1);
 }
 #panel.on .panel-bg { opacity:1; }
@@ -374,7 +376,9 @@ body.panel-open #three { transform:translateX(-3.5vw); }
   position:absolute; top:0; right:0; bottom:0;
   width:clamp(520px,72vw,1100px);
   overflow-y:auto;
-  background:linear-gradient(175deg,rgba(18,17,15,.94) 0%,rgba(10,9,8,.96) 100%);
+  background:linear-gradient(175deg,rgba(18,17,15,.82) 0%,rgba(10,9,8,.88) 100%);
+  backdrop-filter:blur(28px) saturate(1.15) brightness(.92);
+  -webkit-backdrop-filter:blur(28px) saturate(1.15) brightness(.92);
   border-left:1px solid rgba(196,154,82,.10);
   box-shadow:-60px 0 120px rgba(0,0,0,.6);
   transform:translateX(102%);
@@ -395,7 +399,9 @@ body.panel-open #three { transform:translateX(-3.5vw); }
 .panel-head {
   position:sticky; top:0; z-index:2;
   padding:40px 44px 0;
-  background:rgba(14,13,12,.96);
+  background:rgba(14,13,12,.84);
+  backdrop-filter:blur(28px);
+  -webkit-backdrop-filter:blur(28px);
   transition:padding .4s cubic-bezier(.4,0,.2,1);
 }
 .panel-head.scrolled { padding:18px 44px 0; }
@@ -849,7 +855,7 @@ body::after {
 
 <div id="hint">
   <div id="hint-inner">
-    <div class="hint-txt">Hover to approach · Click to enter</div>
+    <div class="hint-txt">Drag to explore · Scroll to move closer · Click to enter</div>
     <div class="hint-line"></div>
   </div>
 </div>
@@ -1348,6 +1354,7 @@ window._sceneState = {
   var pl={x:.92,y:.45,r:380,rRot:0};
 
   // Planet position for occultation — baked into offscreen stars (planet is static)
+  var _occR = 0.001;   // 不再烘焙假的“压暗圈”：遮挡改为星球圆盘按真实投影位置动态挡住星空
   var _plOccX = pl.x * W;
   var _plOccY = pl.y * H;
 
@@ -1362,7 +1369,7 @@ window._sceneState = {
     var py = s.y * H;
     var _odx = px - _plOccX, _ody = py - _plOccY;
     var _odist = Math.sqrt(_odx*_odx + _ody*_ody);
-    var _occ = 1.0 - Math.max(0, 1.0 - (_odist / (W * 0.38)));
+    var _occ = 1.0 - Math.max(0, 1.0 - (_odist / _occR));
     _occ = _occ * _occ;
     var a = s.base * _occ;
     if(a < 0.004) return;
@@ -1400,7 +1407,7 @@ window._sceneState = {
       var py = s.y * H;
       var _odx = px - _plOccX, _ody = py - _plOccY;
       var _odist = Math.sqrt(_odx*_odx + _ody*_ody);
-      var _occ = 1.0 - Math.max(0, 1.0 - (_odist / (W * 0.38)));
+      var _occ = 1.0 - Math.max(0, 1.0 - (_odist / _occR));
       _occ = _occ * _occ;
       var a = s.base * _occ;
       if(a < 0.004) return;
@@ -1442,7 +1449,8 @@ window._sceneState = {
   var _crNext  = -1;   // timestamp of next flash (sentinel -1 = not yet scheduled)
   var _crFlash = null; // active flash: {x,y,type,life,maxLife,angle,len,r,cr,cg,cb}
   function draw(){
-    requestAnimationFrame(draw);
+    // three 主循环接管后（_bgExternal），由它在同一帧里调用 draw()，这里不再自己排队
+    if(!window._bgExternal) requestAnimationFrame(draw);
     // Delta-time advance: keeps t flowing at ~0.004/frame (60fps) regardless of
     // how long the browser paused rAF (DevTools focus, tab switch, etc.)
     var _nowMs = performance.now();
@@ -1465,6 +1473,59 @@ window._sceneState = {
     }
 
     ctx.clearRect(0,0,W,H);
+
+    // ── 背景 = 摄像机所在的宇宙“天球” ─────────────────────────────────
+    // 真实太空里，摄像机环绕主体拍摄时，远处背景的表现是：
+    //   · 极远的星空（视为无穷远）没有视差，只随【镜头朝向】整体扫过画面：
+    //     镜头转了多少角度，星空就按 焦距×角度 滑过多少像素，方向与镜头转向相反；
+    //   · 有限距离的天体（星球、星云）因机位平移还有一点点透视视差，
+    //     比无穷远的星空扫得略少，且按“近大远小”随推拉缩放；
+    //   · 手持晃动、滚转、FOV 呼吸会让整个画面同步起伏，背景必须同帧同步。
+    // 这里直接读取 three.js 相机的最终位姿（含晃动/滚转/FOV），不做任何额外平滑，
+    // 并由 three 主循环在同一帧里驱动本函数 —— 背景与石头、星点层永远不差一帧。
+    var _bgv = window._bgView, _bgOn = !!(_bgv && _bgv.ready);
+    var _bgCx = _bgOn ? _bgv.cx : W*0.5, _bgCy = _bgOn ? _bgv.cy : H*0.5;
+    var _bgRoll = _bgOn ? _bgv.roll : 0;
+    var _stRoll = _bgOn ? _bgv.st.roll : 0;                                  // 星空自己的滚转（陀螺积分，翻过头顶也连续）
+    var _bgZoom = 1; // 天体在无穷远：推拉/FOV 变化时大小不变，只随镜头朝向移动
+    var _stX = _bgOn ? _bgv.st.x : 0, _stY = _bgOn ? _bgv.st.y : 0;     // 星空（无穷远）
+    var _nbX = _bgOn ? _bgv.nb.x : 0, _nbY = _bgOn ? _bgv.nb.y : 0;     // 星云（很远但有限）
+    var _nbFade = _bgOn && _bgv.nb.fade !== undefined ? _bgv.nb.fade : 1;   // 星云/雾的可见度（转到背面时为 0）
+    // 星云是一组固定位置的柔和渐变，没法无缝平铺：把位移软限制在 ±0.3W / ±0.3H 内，
+    // 小角度下仍与相机 1:1（线性段），大角度时缓缓“淡出”而不是露出空白。
+    var _nbLimX = W*0.3, _nbLimY = H*0.3;
+    _nbX = _nbLimX * Math.tanh(_nbX / _nbLimX);
+    _nbY = _nbLimY * Math.tanh(_nbY / _nbLimY);
+    // 星球：真实 3D 点（在主体后方 1400 单位处），按相机投影得到屏幕位置与大小
+    var _plDefX = isMob ? (W + (pl.r*.65)*.08) : (pl.x*W);
+    var _plDefY = isMob ? (H*.25) : (pl.y*H);
+    var _plp = (_bgOn && window._bgProject) ? window._bgProject(_plDefX, _plDefY, 1400) : null;
+    var _plS = _plp ? Math.max(0.0001, _plp.s) : 1;
+    // 星球相对镜头的方位：_lcos = 视线与星球方向夹角的余弦（1=正对，0=侧面，-1=背对）；
+    // (_lux,_luy) = 屏幕上指向星球的单位向量。星球在画面外/身后时，光照仍然依此方位给出
+    var _lcos = 1, _lux = 1, _luy = 0;
+    if(_plp && _plp.dz !== undefined){
+      _lcos = -_plp.dz;
+      var _lsx = _plp.dx, _lsy = -_plp.dy, _lsl = Math.sqrt(_lsx*_lsx + _lsy*_lsy);
+      if(_lsl > 1e-3){ _lux = _lsx/_lsl; _luy = _lsy/_lsl; }
+    }
+    function _sstD(a,b,x){ var q=(x-a)/(b-a); q=q<0?0:q>1?1:q; return q*q*(3-2*q); }
+    // 把 ctx 变换到“星球所在的投影位置”：平移到投影点 → 随相机滚转 → 近大远小缩放
+    function _applyPlanetXform(withRoll){
+      if(!_plp){ return; }
+      ctx.translate(_plp.x, _plp.y);
+      if(withRoll) ctx.rotate(_bgRoll);
+      ctx.scale(_plS, _plS);
+      ctx.translate(-_plDefX, -_plDefY);
+    }
+    // 星空/星云共用：绕屏幕中心的滚转 + FOV 缩放
+    function _applySkyXform(shiftX, shiftY, rollOverride){
+      ctx.translate(_bgCx, _bgCy);
+      ctx.rotate(rollOverride === undefined ? _bgRoll : rollOverride);
+      ctx.scale(_bgZoom, _bgZoom);
+      ctx.translate(shiftX, shiftY);
+      ctx.translate(-_bgCx, -_bgCy);
+    }
 
     // ══════════════════════════════════════════════════════════════
     // 平板端终极椭圆修复 — ctx.scale() 等比坐标系
@@ -1498,6 +1559,8 @@ window._sceneState = {
     // Mobile: simplified 2-cloud version (no breathing sin, fewer stops) — still rich, not free.
     if(_perf !== 'low' || isMob){
       ctx.save();
+      _applySkyXform(_nbX, _nbY);             // 天球：星云层
+      ctx.globalAlpha = _nbFade;
       ctx.globalCompositeOperation = 'lighter';
       if(isTablet){ ctx.scale(1, _tabAR); }   // ← 平板：Y轴拉伸使坐标系变正方形
 
@@ -1507,13 +1570,13 @@ window._sceneState = {
         _gaMob.addColorStop(0,   'rgba(48,28,8,0.115)');
         _gaMob.addColorStop(0.5, 'rgba(22,12,4,0.032)');
         _gaMob.addColorStop(1,   'rgba(0,0,0,0)');
-        ctx.fillStyle = _gaMob; ctx.fillRect(0, 0, W, _tabInvH);
+        ctx.fillStyle = _gaMob; ctx.fillRect(-W*4, -_tabInvH*4, W*9, _tabInvH*9);
 
         var _gbMob = ctx.createRadialGradient(_tX(0.78),_tY(0.25),0, _tX(0.78),_tY(0.25),_tR(0.52));
         _gbMob.addColorStop(0,   'rgba(10,14,38,0.092)');
         _gbMob.addColorStop(0.5, 'rgba(5,7,20,0.025)');
         _gbMob.addColorStop(1,   'rgba(0,0,0,0)');
-        ctx.fillStyle = _gbMob; ctx.fillRect(0, 0, W, _tabInvH);
+        ctx.fillStyle = _gbMob; ctx.fillRect(-W*4, -_tabInvH*4, W*9, _tabInvH*9);
       } else {
         // Desktop / Tablet: full 4-cloud breathing nebula
         var _nb = 0.72 + 0.28 * Math.sin(t * 0.016) * Math.sin(t * 0.011);
@@ -1522,26 +1585,26 @@ window._sceneState = {
         _ga.addColorStop(0,   'rgba(38,22,8,'  + (0.095 * _nb).toFixed(4) + ')');
         _ga.addColorStop(0.4, 'rgba(18,10,4,'  + (0.032 * _nb).toFixed(4) + ')');
         _ga.addColorStop(1,   'rgba(0,0,0,0)');
-        ctx.fillStyle = _ga; ctx.fillRect(0, 0, W, _tabInvH);
+        ctx.fillStyle = _ga; ctx.fillRect(-W*4, -_tabInvH*4, W*9, _tabInvH*9);
 
         var _gb = ctx.createRadialGradient(_tX(0.78),_tY(0.22),0, _tX(0.78),_tY(0.22),_tR(0.44));
         _gb.addColorStop(0,   'rgba(8,12,32,'  + (0.085 * _nb).toFixed(4) + ')');
         _gb.addColorStop(0.45,'rgba(4,6,18,'   + (0.026 * _nb).toFixed(4) + ')');
         _gb.addColorStop(1,   'rgba(0,0,0,0)');
-        ctx.fillStyle = _gb; ctx.fillRect(0, 0, W, _tabInvH);
+        ctx.fillStyle = _gb; ctx.fillRect(-W*4, -_tabInvH*4, W*9, _tabInvH*9);
 
         var _nbC = 0.68 + 0.32 * Math.sin(t * 0.013 + 2.1);
         var _gc = ctx.createRadialGradient(_tX(0.68),_tY(0.74),0, _tX(0.68),_tY(0.74),_tR(0.38));
         _gc.addColorStop(0,   'rgba(6,8,22,'   + (0.068 * _nbC).toFixed(4) + ')');
         _gc.addColorStop(0.5, 'rgba(3,4,12,'   + (0.018 * _nbC).toFixed(4) + ')');
         _gc.addColorStop(1,   'rgba(0,0,0,0)');
-        ctx.fillStyle = _gc; ctx.fillRect(0, 0, W, _tabInvH);
+        ctx.fillStyle = _gc; ctx.fillRect(-W*4, -_tabInvH*4, W*9, _tabInvH*9);
 
         var _nbD = 0.75 + 0.25 * Math.sin(t * 0.009 + 4.8);
         var _gd = ctx.createRadialGradient(_tX(0.54),_tY(0.50),0, _tX(0.54),_tY(0.50),_tR(0.30));
         _gd.addColorStop(0,   'rgba(22,14,6,'  + (0.028 * _nbD).toFixed(4) + ')');
         _gd.addColorStop(1,   'rgba(0,0,0,0)');
-        ctx.fillStyle = _gd; ctx.fillRect(0, 0, W, _tabInvH);
+        ctx.fillStyle = _gd; ctx.fillRect(-W*4, -_tabInvH*4, W*9, _tabInvH*9);
       }
 
       ctx.globalCompositeOperation = 'source-over';
@@ -1593,16 +1656,32 @@ window._sceneState = {
 
     // ── Static stars — blit offscreen canvas in ONE drawImage call ──
     // 15996 stars pre-baked, no per-frame arc() calls
-    ctx.drawImage(_starOffscreen, 0, 0);
+    ctx.save();
+    // 星空是无穷远天球：按相机朝向角×焦距滑动。位移可以很大，所以对 W/H 取模并平铺，边缘永远有星
+    var _msx = ((_stX % W) + W) % W, _msy = ((_stY % H) + H) % H;
+    _applySkyXform(_msx, _msy, _stRoll);
+    (function(){
+      var _mgx = Math.hypot(W,H)*0.5, _mgy = _mgx;   // 任意角度滚转（含倒置）时四角需要的余量
+      for(var _tx=-1; _tx<=1; _tx++){
+        var _ox = _tx*W;
+        if(_msx + _ox > W + _mgx || _msx + _ox + W < -_mgx) continue;
+        for(var _ty=-1; _ty<=1; _ty++){
+          var _oy = _ty*H;
+          if(_msy + _oy > H + _mgy || _msy + _oy + H < -_mgy) continue;
+          ctx.drawImage(_starOffscreen, _ox, _oy);
+        }
+      }
+    })();
 
     // ── Flicker stars — ~15% of brighter static stars, drawn per-frame ──
     if(_perf !== 'low'){
       var _plFx = pl.x * W, _plFy = pl.y * H;
       for(var _fi = 0; _fi < _flickerStars.length; _fi++){
         var _fs = _flickerStars[_fi];
-        var _fpx = _fs.x * W, _fpy = _fs.y * H;
+        // 取模包裹：保证大角度扫动后闪烁星也留在屏幕里（ctx 已平移了 _msx/_msy）
+        var _fpx = ((_fs.x*W + _msx) % W) - _msx, _fpy = ((_fs.y*H + _msy) % H) - _msy;
         var _fodx = _fpx - _plFx, _fody = _fpy - _plFy;
-        var _focc = 1.0 - Math.max(0, 1.0 - (Math.sqrt(_fodx*_fodx+_fody*_fody) / (W*0.38)));
+        var _focc = 1.0 - Math.max(0, 1.0 - (Math.sqrt(_fodx*_fodx+_fody*_fody) / _occR));
         _focc = _focc * _focc;
         var _fFlicker = 1.0 + _fs.flickerAmp * Math.sin(t * _fs.flickerSp + _fs.flickerPh);
         var _fa = Math.min(_fs.base * _focc * _fFlicker, 0.82);
@@ -1659,7 +1738,7 @@ window._sceneState = {
       // Occultation
       var _odx = px-_plScreenX, _ody = py-_plScreenY;
       var _odist = Math.sqrt(_odx*_odx+_ody*_ody);
-      var _occ = 1.0 - Math.max(0, 1.0-(_odist/(W*0.30)));
+      var _occ = 1.0 - Math.max(0, 1.0-(_odist/_occR));
       a *= _occ * _occ;
 
       // Shock wave displacement
@@ -1902,9 +1981,31 @@ window._sceneState = {
       }
     }
 
+    ctx.restore();   // end 星空层
+
+    // ── 星球层：有限距离的真实 3D 天体 —— 屏幕位置/大小/滚转都由相机投影决定 ──
     pl.rRot+=.00015;
     var r=isMob?pl.r*.65:pl.r;
     var px=isMob?(W+r*.08):(pl.x*W), py=isMob?(H*.25):(pl.y*H);
+    var _plVis = !!(_plp && _plp.s > 0.002);
+    var rings, lwsAll, lws, wtBack, wtFront, lwOff;
+    if(_plVis){
+    ctx.save();
+    _applyPlanetXform(true);
+
+    // 实体遮挡：星球圆盘把身后的星点 / 银河 / 星云真正“挡住”，边缘只留极窄的柔和过渡
+    // （原来的星球是半透明贴图，星点会从它身上透出来 —— 这就是“贴纸感”）
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    var _eR = r*1.9;
+    var _eg = ctx.createRadialGradient(px,py,0,px,py,_eR);
+    _eg.addColorStop(0,    'rgba(0,0,0,1)');
+    _eg.addColorStop(0.50, 'rgba(0,0,0,1)');
+    _eg.addColorStop(0.535,'rgba(0,0,0,.62)');
+    _eg.addColorStop(0.75, 'rgba(0,0,0,.18)');
+    _eg.addColorStop(1,    'rgba(0,0,0,0)');
+    ctx.beginPath();ctx.arc(px,py,_eR,0,Math.PI*2);ctx.fillStyle=_eg;ctx.fill();
+    ctx.restore();
 
     // Subtle atmospheric scattering to enhance depth and distance
     var scatter=ctx.createRadialGradient(px,py,r*.8,px,py,r*3.2);
@@ -1921,6 +2022,29 @@ window._sceneState = {
     glow.addColorStop(.70,'rgba(140,102,38,.07)');
     glow.addColorStop(1,'rgba(0,0,0,0)');
     ctx.beginPath();ctx.arc(px,py,r*1.9,0,Math.PI*2);ctx.fillStyle=glow;ctx.fill();
+
+    // 光环后半段：先画，随后被不透明的星球本体真正遮住
+    rings=[
+      {rx:r*1.38,ry:r*.132,a:.26,tilt:.18},
+      {rx:r*1.62,ry:r*.17, a:.16,tilt:.18},
+      {rx:r*1.86,ry:r*.21, a:.09,tilt:.18},
+    ];
+    lwsAll=[28,20,14,9,5.5,3,1.6,.8,.4,.15];
+    lws = isMob ? lwsAll.slice(3) : lwsAll;
+    wtBack =[.02,.03,.05,.08,.12,.18,.27,.38,.50,.62];
+    wtFront=[.01,.015,.025,.04,.06,.09,.13,.19,.25,.32];
+    lwOff = isMob ? 3 : 0;
+    ctx.save();ctx.translate(px,py);ctx.rotate(pl.rRot*.35);
+    rings.forEach(function(rg){
+      lws.forEach(function(lw,li){
+        ctx.beginPath();ctx.ellipse(0,0,rg.rx,rg.ry,rg.tilt,Math.PI,Math.PI*2);
+        ctx.strokeStyle='rgba(196,154,82,'+(rg.a*wtBack[li+lwOff])+')';ctx.lineWidth=lw;ctx.stroke();
+      });
+    });
+    ctx.restore();
+
+    // 不透明的实心底盘：星球有“质量”，身后的一切都被它挡住
+    ctx.beginPath();ctx.arc(px,py,r,0,Math.PI*2);ctx.fillStyle='rgb(16,12,6)';ctx.fill();
 
     // Core visuals employ multi-stop gradients to achieve silky, fluid transitions
     var body=ctx.createRadialGradient(px,py,0,px,py,r);
@@ -1968,15 +2092,25 @@ window._sceneState = {
     dispOut.addColorStop(1,  'rgba(220,80,120,0)');
     ctx.beginPath();ctx.arc(px,py,r*1.04,0,Math.PI*2);ctx.fillStyle=dispOut;ctx.fill();
 
-    // **Light and shadow — deeper terminator for stronger 3-D volume.**
-    var sh=ctx.createRadialGradient(px+r*.42,py+r*.36,r*.08,px,py,r);
+    // 星球自身发光：不再有“一侧被照亮、另一侧变暗”的明暗交界线，
+    // 而是均匀的临边变暗（球体感）+ 四周对称的日冕光 —— 无论从哪个方向看它，光都同样向外散发
+    var sh=ctx.createRadialGradient(px,py,r*.30,px,py,r);
     sh.addColorStop(0,  'rgba(0,0,0,0)');
-    sh.addColorStop(.32,'rgba(0,0,0,0)');
-    sh.addColorStop(.52,'rgba(0,0,0,.08)');
-    sh.addColorStop(.68,'rgba(0,0,0,.18)');
-    sh.addColorStop(.82,'rgba(0,0,0,.30)');
-    sh.addColorStop(1,  'rgba(0,0,0,.44)');
+    sh.addColorStop(.62,'rgba(0,0,0,.05)');
+    sh.addColorStop(.86,'rgba(0,0,0,.14)');
+    sh.addColorStop(1,  'rgba(0,0,0,.24)');
     ctx.beginPath();ctx.arc(px,py,r,0,Math.PI*2);ctx.fillStyle=sh;ctx.fill();
+    var _cb = 0.86 + 0.14*Math.sin(t*0.011) + 0.05*Math.sin(t*0.023+1.3);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    var cor=ctx.createRadialGradient(px,py,r*.96,px,py,r*2.6);
+    cor.addColorStop(0,   'rgba(232,186,104,'+(0.20*_cb).toFixed(4)+')');
+    cor.addColorStop(.10, 'rgba(214,168,88,' +(0.12*_cb).toFixed(4)+')');
+    cor.addColorStop(.32, 'rgba(180,136,62,' +(0.05*_cb).toFixed(4)+')');
+    cor.addColorStop(.65, 'rgba(140,102,40,' +(0.016*_cb).toFixed(4)+')');
+    cor.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.beginPath();ctx.arc(px,py,r*2.6,0,Math.PI*2);ctx.fillStyle=cor;ctx.fill();
+    ctx.restore();
 
 
 
@@ -1984,23 +2118,9 @@ window._sceneState = {
 
     // Halo uses 10 layers, drawn in front and back halves (back bright, front slightly dim)
     // On mobile, the 3 thickest layers are skipped to save GPU
+    // 光环前半段：画在星球本体之上
     ctx.save();ctx.translate(px,py);ctx.rotate(pl.rRot*.35);
-    var rings=[
-      {rx:r*1.38,ry:r*.132,a:.26,tilt:.18},
-      {rx:r*1.62,ry:r*.17, a:.16,tilt:.18},
-      {rx:r*1.86,ry:r*.21, a:.09,tilt:.18},
-    ];
-    var lwsAll=[28,20,14,9,5.5,3,1.6,.8,.4,.15];
-    var lws = isMob ? lwsAll.slice(3) : lwsAll; // mobile skips 28,20,14
-    var wtBack =[.02,.03,.05,.08,.12,.18,.27,.38,.50,.62];
-    var wtFront=[.01,.015,.025,.04,.06,.09,.13,.19,.25,.32];
-    // offset into weight arrays when mobile (slice skips first 3)
-    var lwOff = isMob ? 3 : 0;
     rings.forEach(function(rg){
-      lws.forEach(function(lw,li){
-        ctx.beginPath();ctx.ellipse(0,0,rg.rx,rg.ry,rg.tilt,Math.PI,Math.PI*2);
-        ctx.strokeStyle='rgba(196,154,82,'+(rg.a*wtBack[li+lwOff])+')';ctx.lineWidth=lw;ctx.stroke();
-      });
       lws.forEach(function(lw,li){
         ctx.beginPath();ctx.ellipse(0,0,rg.rx,rg.ry,rg.tilt,0,Math.PI);
         ctx.strokeStyle='rgba(196,154,82,'+(rg.a*wtFront[li+lwOff])+')';ctx.lineWidth=lw;ctx.stroke();
@@ -2041,11 +2161,15 @@ window._sceneState = {
     ctx.stroke();
 
     ctx.restore();
+    ctx.restore();
+    }   // end 星球层
 
     // ── Volumetric fog — 3 drifting elliptical nebulae ──
     // Skipped on low/mid-end devices: each nebula = radial gradient + ctx.save/restore per frame.
     // ref: MDN WebGL best practices — avoid overdraw on fragment-heavy paths for mobile GPUs
     // Mobile: 1 static fog blob — no drift math, cheap but adds warmth.
+    ctx.save(); _applySkyXform(_nbX, _nbY);  // 天球：雾属于远景
+    ctx.globalAlpha = _nbFade;
     if(_perf === 'high' || isMob){
     if(isMob){
       // Single warm fog patch — no sin drift, fixed position, one gradient
@@ -2093,6 +2217,7 @@ window._sceneState = {
     });
     } // end desktop fog
     } // end _perf === 'high' || isMob
+    ctx.restore();
 
     // ── Directional light gradient — planet as light source ──
     // Planet sits at ~(0.92W, 0.45H). This creates two overlapping passes:
@@ -2104,7 +2229,8 @@ window._sceneState = {
     // 这样 createRadialGradient 的圆在屏幕上渲染出来还是正圆，不是椭圆。
     {
       // Pass 1: shadow — linear gradient 不受宽高比影响，直接在正常坐标系画
-      var _shadow = ctx.createLinearGradient(0, H*0.1, W*0.78, H*0.9);
+      var _sD = Math.sqrt(W*W + H*H);
+      var _shadow = ctx.createLinearGradient(W*0.5 - _lux*_sD*0.5, H*0.5 - _luy*_sD*0.5, W*0.5 + _lux*_sD*0.4, H*0.5 + _luy*_sD*0.4);
       _shadow.addColorStop(0.000, 'rgba(6,5,3,0.28)');
       _shadow.addColorStop(0.086, 'rgba(6,5,3,0.26)');
       _shadow.addColorStop(0.170, 'rgba(6,5,3,0.22)');
@@ -2114,11 +2240,15 @@ window._sceneState = {
       _shadow.addColorStop(0.650, 'rgba(6,5,3,0.04)');
       _shadow.addColorStop(0.790, 'rgba(6,5,3,0.01)');
       _shadow.addColorStop(1.000, 'rgba(6,5,3,0.00)');
+      ctx.save();
+      ctx.globalAlpha = 1 - 0.55*_sstD(0.2, -0.7, _lcos);   // 背对星球时，整体被它的光“照亮”，阴影变浅
       ctx.fillStyle = _shadow;
       ctx.fillRect(0, 0, W, H);
+      ctx.restore();
 
       // Pass 2: planet light spill — 用等比坐标系确保是正圆
       ctx.save();
+      _applyPlanetXform(false);               // 光晕跟着星球的投影位置与大小
       if(isTablet){ ctx.scale(1, _tabAR); }  // 压缩Y轴 → 正方形坐标系
 
       var _plBreath = 0.82 + 0.12 * Math.sin(t * 0.007)
@@ -2135,8 +2265,39 @@ window._sceneState = {
       _spill.addColorStop(0.75, 'rgba(130,95,36,'  + (0.04 * _plBreath).toFixed(4) + ')');
       _spill.addColorStop(1,    'rgba(0,0,0,0)');
       ctx.fillStyle = _spill;
-      ctx.fillRect(0, 0, W, _tabInvH);
+      // 【修复】只填渐变半径内的区域（半径外本来就是全透明），
+      // 不再用 9 倍屏幕大小的巨型矩形，避免手机 GPU 对超大低透明度渐变四边形的分块/量化闪烁。
+      var _spR = _tR(0.82) + 2;
+      ctx.fillRect(_spPlx - _spR, _spPly - _spR, _spR*2, _spR*2);
       ctx.restore();
+
+      // Pass 3: 星球不在画面里（侧面 / 背后）时，它的光依然存在 ——
+      //   · 侧面：画面边缘朝向星球的一侧泛出暖光（光溢出画框）
+      //   · 背后：整个场景被一层很淡的暖色环境光罩住（物体被从镜头后方照亮）
+      var _pI = (_plp && _plp.I) ? _plp.I : 1;
+      var _sinA = _plp ? Math.min(1, Math.sqrt(_plp.dx*_plp.dx + _plp.dy*_plp.dy)) : 0;
+      var _edgeK = _sstD(0.82, 0.22, _lcos) * _sstD(0.0, 0.22, _sinA) * (1 - 0.20*_sstD(0.1, -0.9, _lcos)) * 1.0;
+      var _veil  = _sstD(0.35, -0.7, _lcos) * 0.070 + _sstD(0.8, 0.2, _lcos) * 0.020;
+      if(_edgeK*_pI > 0.004 || _veil > 0.003){
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        if(_veil > 0.003){
+          ctx.fillStyle = 'rgba(176,138,74,' + (_veil*_pI*_plBreath).toFixed(4) + ')';
+          ctx.fillRect(0, 0, W, H);
+        }
+        if(_edgeK*_pI > 0.004){
+          var _bcx = W*0.5 + _lux*_sD*0.62, _bcy = H*0.5 + _luy*_sD*0.62, _brr = _sD*0.78;
+          var _ba  = _edgeK*_pI*_plBreath;
+          var _bgr = ctx.createRadialGradient(_bcx,_bcy,0,_bcx,_bcy,_brr);
+          _bgr.addColorStop(0,    'rgba(210,168,92,' + (0.34*_ba).toFixed(4) + ')');
+          _bgr.addColorStop(0.35, 'rgba(196,150,74,' + (0.17*_ba).toFixed(4) + ')');
+          _bgr.addColorStop(0.65, 'rgba(160,118,52,' + (0.06*_ba).toFixed(4) + ')');
+          _bgr.addColorStop(1,    'rgba(0,0,0,0)');
+          ctx.fillStyle = _bgr;
+          ctx.fillRect(0, 0, W, H);
+        }
+        ctx.restore();
+      }
     }
 
     // ── Crystal caustics ──
@@ -2241,6 +2402,7 @@ window._sceneState = {
       }
     }
   }
+  window._bgDraw = draw;
   draw();
 
   // ── Background parallax ──
@@ -2270,7 +2432,7 @@ window._sceneState = {
       bgShiftTarget = document.body.classList.contains('panel-open') ? -window.innerWidth*0.0233 : 0;
       bgShiftX += (bgShiftTarget - bgShiftX) * 0.06;
     }
-    c.style.transform = 'translate(' + (bgCx + bgShiftX) + 'px,' + bgCy + 'px)';
+    c.style.transform = 'translate(' + (bgShiftX) + 'px,0px) scale(1.08)';
     requestAnimationFrame(bgTick);
   })();
 })();
@@ -2533,7 +2695,7 @@ window._sceneState = {
   // Update hint text for touch
   if(isMobile){
     var _ht=document.getElementById('hint');
-    if(_ht){var _htxt=_ht.querySelector('.hint-txt');if(_htxt)_htxt.textContent='Tap a crystal to enter';}
+    if(_ht){var _htxt=_ht.querySelector('.hint-txt');if(_htxt)_htxt.textContent='Drag to look around · Tap a crystal to enter';}
   }
 
   // Renderer — antialias:false because the entire frame goes through custom FBOs
@@ -2563,8 +2725,9 @@ window._sceneState = {
   conCanvas.height = H;
 
   var scene  = new THREE.Scene();
-  var camera = new THREE.PerspectiveCamera(55, CW/H, 0.1, 2000);
+  var camera = new THREE.PerspectiveCamera(55, CW/H, 0.1, 3600);
   camera.position.set(0,0,520);
+  var _bgTmpV = new THREE.Vector3();   // 背景天球同步用的临时向量
 
   // ── Organic camera sway — three-layer frequency model ──
   // Based on real handheld camera shake data (Videomaker 1994, CIPA standard):
@@ -2762,6 +2925,9 @@ window._sceneState = {
   //    is simulated by adding a dim back-face contribution
   // ══════════════════════════════════════════════════════
 
+  // 星球的光（相机坐标系下的方向 + 强度）：所有晶体共用，每帧由背景同步块更新。
+  var _planetLight = { dir:{value:new THREE.Vector3(0.8,0.05,-0.6).normalize()}, I:{value:1} };
+
   var crystalVS = `
     varying vec3 vNormal;
     varying vec3 vViewDir;
@@ -2864,6 +3030,7 @@ window._sceneState = {
       col += spec2 * gold * 1.0;
       col += fr    * gold * (0.82 + uHover*.32);
       col += irid  * iridMask;
+
 
       // ── Interior core glow ──
       // Simulates light trapped inside the crystal, drifting and breathing.
@@ -3089,6 +3256,67 @@ window._sceneState = {
     });
   });
 
+  // ── Volumetric star field: actual world-space layers, not a flat background texture ──
+  // Three layers travel through perspective at different rates. Their relative motion
+  // during camera drag gives the viewer a stable near/mid/far reference frame.
+  function makeSpatialStarLayer(count, zMin, zMax, spread, sizeMin, sizeMax, alphaMin, alphaMax, seed, renderOrder){
+    var rng = seededRand(seed);
+    var pos = new Float32Array(count * 3);
+    var size = new Float32Array(count);
+    var alpha = new Float32Array(count);
+    for(var si=0; si<count; si++){
+      pos[si*3]   = (rng() - 0.5) * visW * spread * 2;
+      pos[si*3+1] = (rng() - 0.5) * visH * spread * 2;
+      pos[si*3+2] = zMin + rng() * (zMax-zMin);
+      size[si] = sizeMin + rng() * (sizeMax-sizeMin);
+      alpha[si] = alphaMin + rng() * (alphaMax-alphaMin);
+    }
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+    geo.setAttribute('aAlpha', new THREE.BufferAttribute(alpha, 1));
+    var mat = new THREE.ShaderMaterial({
+      uniforms: { uPixelRatio: { value: renderer.getPixelRatio() } },
+      vertexShader: `
+        attribute float aSize;
+        attribute float aAlpha;
+        uniform float uPixelRatio;
+        varying float vAlpha;
+        void main(){
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          float depth = max(1.0, -mvPosition.z);
+          gl_PointSize = clamp(aSize * uPixelRatio * (470.0 / depth), 0.9 * uPixelRatio, 5.0 * uPixelRatio);
+          vAlpha = aAlpha;
+        }
+      `,
+      fragmentShader: `
+        varying float vAlpha;
+        void main(){
+          float d = distance(gl_PointCoord, vec2(0.5));
+          if(d > 0.5) discard;
+          float soft = 1.0 - smoothstep(0.06, 0.5, d);
+          float core = 1.0 - smoothstep(0.0, 0.29, d);
+          vec3 tint = mix(vec3(0.48, 0.35, 0.18), vec3(1.0, 0.88, 0.66), core * 0.62);
+          gl_FragColor = vec4(tint, vAlpha * soft);
+        }
+      `,
+      transparent: true,
+      depthTest: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    var stars = new THREE.Points(geo, mat);
+    stars.renderOrder = renderOrder;
+    stars.frustumCulled = false;
+    scene.add(stars);
+    return stars;
+  }
+  var _spatialStars = [];
+  _spatialStars.push(makeSpatialStarLayer(isMobile ? 480 : 980, -1180, -280, 3.1, 1.0, 2.0, 0.07, 0.19, 1471, -20)); // far field
+  _spatialStars.push(makeSpatialStarLayer(isMobile ? 170 : 380,  -260,   45, 2.4, 1.0, 2.1, 0.045, 0.13, 8237, -10)); // mid field
+  _spatialStars.push(makeSpatialStarLayer(isMobile ?  46 : 110,   115,  285, 1.9, 0.55, 1.25, 0.025, 0.085, 19331, 2)); // near dust
+
   // ── Label DOM elements ──
   var labelContainer = document.createElement('div');
   labelContainer.style.cssText='position:fixed;inset:0;pointer-events:none;z-index:15;';
@@ -3182,6 +3410,10 @@ window._sceneState = {
     el.style.transition = 'filter 1.4s cubic-bezier(.25,.1,.25,1)';
     var randomDelay = 4200 + 1800 + Math.random() * 2400; // 6000–8600ms total
     setTimeout(function(){ el.style.filter = 'blur(0px)'; }, randomDelay);
+    // 【修复】手机端：标签清晰后移除 filter / will-change:filter，避免残留的滤镜层
+    if(isMobile){
+      setTimeout(function(){ el.style.filter = 'none'; el.style.willChange = 'transform'; }, randomDelay + 1600);
+    }
   });
 
   // ── Raycasting ──
@@ -3197,6 +3429,7 @@ window._sceneState = {
     mouse.y = -(e.clientY/H)*2+1;
   });
   canvas.addEventListener('click',function(){
+    if(_viewSuppressClick){ _viewSuppressClick = false; return; }
     if(isTouchDev && Date.now() - _lastTouchTapT < 800) return; // 触摸点击由 touchend 处理，避免重复/用到过期的 hoveredIdx
     if(hoveredIdx >= 0){
       // ── Snap camera back to origin on crystal click ──
@@ -3334,6 +3567,19 @@ window._sceneState = {
     canvas.addEventListener('touchstart', function(e){
       _tsx = e.touches[0].clientX;
       _tsy = e.touches[0].clientY;
+      _viewTouchActive = true;
+      if(e.touches.length === 1){
+        _viewTouchMoved = false;
+        _viewTouchLastX = e.touches[0].clientX;
+        _viewTouchLastY = e.touches[0].clientY;
+        _viewTouchPinchDistance = 0;
+      } else {
+        _viewTouchMoved = true; // a multi-touch gesture must never be treated as a tap
+        var _vta = e.touches[0], _vtb = e.touches[1];
+        _viewTouchPinchDistance = Math.hypot(_vta.clientX-_vtb.clientX, _vta.clientY-_vtb.clientY);
+        _viewTouchLastX = (_vta.clientX+_vtb.clientX)*0.5;
+        _viewTouchLastY = (_vta.clientY+_vtb.clientY)*0.5;
+      }
       mouse.x =  ((_tsx + CANVAS_OVERHANG * 0.5) / CW) * 2 - 1;
       mouse.y = -(_tsy / H) * 2 + 1;
       // 快照此刻相机位置，touchend 里的 raycast 和屏幕投影都用同一套坐标
@@ -3343,7 +3589,59 @@ window._sceneState = {
       showRipple(_tsx, _tsy);
     }, {passive:true});
 
+    canvas.addEventListener('touchmove', function(e){
+      if(!e.touches || e.touches.length === 0) return;
+      if(panelOpen || focusE > 0.02){
+        if(e.touches.length === 1){ _viewTouchLastX=e.touches[0].clientX; _viewTouchLastY=e.touches[0].clientY; }
+        return;
+      }
+      if(e.touches.length === 1){
+        var tx = e.touches[0].clientX, ty = e.touches[0].clientY;
+        var dx = tx - _viewTouchLastX, dy = ty - _viewTouchLastY;
+        if(Math.hypot(tx-_tsx, ty-_tsy) > 9) _viewTouchMoved = true;
+        if(_viewTouchMoved){
+          e.preventDefault();
+          var now = performance.now();
+          var dt = Math.max(0.008, (now - (_viewTouchLastTime || now-16)) / 1000);
+          var ay = -dx * 0.0032, ap = -dy * 0.00245;
+          viewYawTarget = (viewYawTarget + ay);
+          viewPitchTarget = (viewPitchTarget + ap);
+          viewYawVelocity = _viewClamp(ay/dt, -1.9, 1.9)*0.38 + viewYawVelocity*0.62;
+          viewPitchVelocity = _viewClamp(ap/dt, -1.5, 1.5)*0.38 + viewPitchVelocity*0.62;
+          _viewTouchLastTime = now;
+          document.body.classList.add('view-dragging');
+        }
+        _viewTouchLastX = tx; _viewTouchLastY = ty;
+      } else if(e.touches.length >= 2){
+        e.preventDefault();
+        _viewTouchMoved = true;
+        var _ta=e.touches[0], _tb=e.touches[1];
+        var _dist=Math.hypot(_ta.clientX-_tb.clientX, _ta.clientY-_tb.clientY);
+        var _cx=(_ta.clientX+_tb.clientX)*0.5, _cy=(_ta.clientY+_tb.clientY)*0.5;
+        if(_viewTouchPinchDistance > 1){
+          viewDistanceTarget = _viewClamp(viewDistanceTarget * (_viewTouchPinchDistance / Math.max(1,_dist)), VIEW_DIST_MIN, VIEW_DIST_MAX);
+          var _dxp=_cx-_viewTouchLastX, _dyp=_cy-_viewTouchLastY;
+          viewPanXTarget = _viewClamp(viewPanXTarget - _dxp*0.34, -VIEW_PAN_X, VIEW_PAN_X);
+          viewPanYTarget = _viewClamp(viewPanYTarget + _dyp*0.34, -VIEW_PAN_Y, VIEW_PAN_Y);
+        }
+        _viewTouchPinchDistance = _dist;
+        _viewTouchLastX = _cx; _viewTouchLastY = _cy;
+        document.body.classList.add('view-dragging');
+      }
+    }, {passive:false});
+
     canvas.addEventListener('touchend', function(e){
+      if(e.touches && e.touches.length > 0){ mouse.set(-9,-9); return; }
+      if(_viewTouchMoved){
+        _viewTouchMoved = false; _viewTouchActive = false; _viewTouchPinchDistance = 0;
+        _viewTouchLastTime = 0;
+        document.body.classList.remove('view-dragging');
+        mouse.set(-9,-9);
+        return;
+      }
+      _viewTouchActive = false;
+      _viewTouchPinchDistance = 0;
+      document.body.classList.remove('view-dragging');
       var t0 = e.changedTouches[0];
 
       // 手指位移超过 28px = 滑动，不触发点击（原为 20px，适当放宽减少误判）
@@ -3552,7 +3850,7 @@ window._sceneState = {
     // youtube → TOP, before any text
     if(sec.youtube){
       html += '<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;margin-bottom:20px">'
-        + '<iframe data-src="'+esc(sec.youtube)+'" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>'
+        + '<iframe src="'+esc(sec.youtube)+'" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>'
         + '</div>';
     }
 
@@ -3797,16 +4095,6 @@ window._sceneState = {
     }
 
     panelBody.innerHTML = html;
-    // iframe 会拉起新进程+网络请求，放在镜头/面板动画结束后再加载
-    var _ifr = panelBody.querySelectorAll('iframe[data-src]');
-    if(_ifr.length){
-      setTimeout(function(){
-        if(!panelOpen) return;
-        for(var _ii=0; _ii<_ifr.length; _ii++){
-          if(_ifr[_ii].isConnected) _ifr[_ii].src = _ifr[_ii].getAttribute('data-src');
-        }
-      }, 900);
-    }
     _bindCollapseButtons(panelBody);
     _bindStatCards(panelBody);
     _bindImageCaps(panelBody);
@@ -4377,52 +4665,69 @@ window._sceneState = {
 
   // Staggered: each stone in the batch spawns with a small time offset (0.3-1.2s apart)
   // so they don't all appear simultaneously — feels like natural debris field flow
+  // ── 3D 体积生成 ──
+  // 石头不再只在 z≈0 的一层平面上从四边滑入，而是在整个球形空间里（X/Y/Z 全轴）出现：
+  //   · 55%  从外层球壳上的任意方向（含正前方、正后方、斜上、斜下）飞入，穿过场景体积
+  //   · 45%  直接在体积内部某个 3D 点“冒出来”（由小变大），再缓慢漂移
+  // 因此无论视角怎么环绕、俯仰、推近，石头在各个深度都有分布。
+  function _miniShellR(){ return Math.max(Math.hypot(visW, visH) * 1.7, 640); }
+  function _rndUnit(out){
+    var u = Math.random()*2 - 1, th = Math.random()*Math.PI*2, r = Math.sqrt(1 - u*u);
+    out.x = r*Math.cos(th); out.y = u; out.z = r*Math.sin(th);
+    return out;
+  }
+  var _su = {x:0,y:0,z:0};
+  function _volPoint(out, k){
+    // 场景体积内的随机点；Z 范围与 X/Y 同量级，而不是一层薄片
+    k = k || 1;
+    out.x = (Math.random()-.5) * visW * 2.1 * k;
+    out.y = (Math.random()-.5) * visH * 2.1 * k;
+    out.z = (Math.random()-.5) * 700 * k;
+    return out;
+  }
+  function _launchMini(m, mode, dirHint){
+    var R = _miniShellR();
+    var px, py, pz, vx, vy, vz;
+    var st = Math.random();
+    var speed = st < 0.3 ? (0.12 + Math.random()*0.10)
+              : st < 0.8 ? (0.22 + Math.random()*0.15)
+              :            (0.40 + Math.random()*0.20);
+    var tgt = _volPoint({x:0,y:0,z:0}, 0.8);
+    if(mode === 'inside'){
+      _volPoint(_su, 1.0);
+      px = _su.x; py = _su.y; pz = _su.z;
+      _rndUnit(_su);
+      var sp = 0.05 + Math.random()*0.14;
+      vx = _su.x*sp; vy = _su.y*sp; vz = _su.z*sp;
+      m.spawnT = 0; m.spawnDur = 1.1 + Math.random()*1.4;      // 冒出：缩放 0 → 1
+    } else {
+      var d = dirHint ? dirHint : _rndUnit(_su);
+      var jit = dirHint ? 0.22 : 0;                              // 石流：方向近似但有抖动
+      var dx = d.x + (Math.random()-.5)*jit, dy = d.y + (Math.random()-.5)*jit, dz = d.z + (Math.random()-.5)*jit;
+      var dl = Math.sqrt(dx*dx+dy*dy+dz*dz) + 1e-6;
+      px = dx/dl*R; py = dy/dl*R*0.75; pz = dz/dl*R;
+      var ex = tgt.x-px, ey = tgt.y-py, ez = tgt.z-pz;
+      var el = Math.sqrt(ex*ex+ey*ey+ez*ez) + 1e-6;
+      vx = ex/el*speed; vy = ey/el*speed; vz = ez/el*speed;       // 全向速度，z 分量不再被压到 0.3
+      m.spawnT = 0.6; m.spawnDur = 0.9;                           // 外层入场：轻微渐入
+    }
+    m.group.position.set(px, py, pz);
+    m.vx = vx; m.vy = vy; m.vz = vz;
+    m.age = 0;
+    m.group.scale.setScalar(0.001);
+    m.alive = true;
+    m.group.visible = true;
+  }
+
   function _spawnOne(dead){
     if(dead.length === 0) return;
-    // Find a stone that is still dead — another timer may have already claimed some
     var m = null;
     while(dead.length > 0){
       var candidate = dead.splice(Math.floor(Math.random()*dead.length), 1)[0];
       if(candidate && !candidate.alive){ m = candidate; break; }
     }
     if(!m) return;
-
-    var spawnSide = Math.floor(Math.random() * 5);
-    var _st = Math.random();
-    var speed = _st < 0.3 ? (0.12 + Math.random()*0.10)
-              : _st < 0.8 ? (0.22 + Math.random()*0.15)
-              :              (0.40 + Math.random()*0.20);
-    var spawnX, spawnY, spawnZ;
-
-    // Spawn well off-screen
-    if(spawnSide === 0){       spawnX = -visW*2.2; spawnY = (Math.random()-.5)*visH*2.0; spawnZ = -60+Math.random()*80; }
-    else if(spawnSide === 1){  spawnX =  visW*2.2; spawnY = (Math.random()-.5)*visH*2.0; spawnZ = -60+Math.random()*80; }
-    else if(spawnSide === 2){  spawnX = (Math.random()-.5)*visW*2.0; spawnY =  visH*2.2; spawnZ = -60+Math.random()*80; }
-    else if(spawnSide === 3){  spawnX = (Math.random()-.5)*visW*2.0; spawnY = -visH*2.2; spawnZ = -60+Math.random()*80; }
-    else {                     // z-far
-      var _zs = Math.floor(Math.random()*4);
-      spawnX = _zs===0 ? -visW*2.0 : _zs===1 ? visW*2.0 : (Math.random()-.5)*visW*2.0;
-      spawnY = _zs===2 ?  visH*2.0 : _zs===3 ? -visH*2.0 : (Math.random()-.5)*visH*2.0;
-      spawnZ = -280;
-    }
-
-    // Aim toward a random point near screen center — guaranteed to pass through scene
-    // Target is within ±60% of screen, so stones always cross the visible area
-    var _targetX = (Math.random()-.5) * visW * 1.2;
-    var _targetY = (Math.random()-.5) * visH * 1.2;
-    var _targetZ = spawnSide===4 ? 60 : spawnZ; // z-far flies toward camera
-    var _dx = _targetX - spawnX;
-    var _dy = _targetY - spawnY;
-    var _dz = _targetZ - spawnZ;
-    var _len = Math.sqrt(_dx*_dx + _dy*_dy + _dz*_dz) + 0.001;
-    var svx = (_dx/_len) * speed;
-    var svy = (_dy/_len) * speed;
-    var svz = spawnSide===4 ? (0.18 + Math.random()*0.20) : (_dz/_len) * speed * 0.3;
-
-    m.group.position.set(spawnX, spawnY, spawnZ);
-    m.vx = svx; m.vy = svy; m.vz = svz;
-    m.alive = true;
-    m.group.visible = true;
+    _launchMini(m, Math.random() < 0.45 ? 'inside' : 'shell');
   }
 
   function _respawnBatch(){
@@ -4460,8 +4765,8 @@ window._sceneState = {
       setTimeout(_spawnStream, 18000 + Math.random()*17000);
       return;
     }
-    // Pick one direction for the whole stream
-    var streamSide = Math.floor(Math.random()*4); // only 4 cardinal sides, no z-far for streams
+    // 一条石流：选一个任意 3D 方向（不再限于上下左右四边）
+    var streamDir = _rndUnit({x:0,y:0,z:0});
     var streamCount = 3 + Math.floor(Math.random()*3); // 3-5 stones
     streamCount = Math.min(streamCount, dead.length);
 
@@ -4470,26 +4775,9 @@ window._sceneState = {
         setTimeout(function(){
           if(deadArr.length === 0) return;
           var m = deadArr.splice(Math.floor(Math.random()*deadArr.length),1)[0];
-          var speed = 0.18 + Math.random()*0.12;
-          var sx, sy, sz, svx, svy, svz;
-
-          // Spawn tightly clustered from same side, small Y/X spread
-          if(streamSide===0){ sx=-visW*2.2; sy=(Math.random()-.5)*visH*0.6; sz=-40+Math.random()*50; }
-          else if(streamSide===1){ sx=visW*2.2; sy=(Math.random()-.5)*visH*0.6; sz=-40+Math.random()*50; }
-          else if(streamSide===2){ sx=(Math.random()-.5)*visW*0.6; sy=visH*2.2; sz=-40+Math.random()*50; }
-          else { sx=(Math.random()-.5)*visW*0.6; sy=-visH*2.2; sz=-40+Math.random()*50; }
-
-          // All aim toward same general area — stream feels coherent
-          var tx = (Math.random()-.5)*visW*0.6;
-          var ty = (Math.random()-.5)*visH*0.6;
-          var ddx=tx-sx, ddy=ty-sy;
-          var dlen=Math.sqrt(ddx*ddx+ddy*ddy)+0.001;
-          svx=(ddx/dlen)*speed; svy=(ddy/dlen)*speed; svz=(Math.random()-.5)*0.02;
-
-          m.group.position.set(sx,sy,sz);
-          m.vx=svx; m.vy=svy; m.vz=svz;
-          m.alive=true; m.group.visible=true;
-        }, idx * (100 + Math.random()*120)); // 100-220ms apart — rapid succession
+          if(!m || m.alive) return;
+          _launchMini(m, 'shell', streamDir);
+        }, idx * (100 + Math.random()*120));
       })(_si, dead);
     }
     setTimeout(_spawnStream, 18000 + Math.random()*17000);
@@ -4505,7 +4793,10 @@ window._sceneState = {
     ndc.unproject(camera);
     var dir = ndc.sub(camera.position).normalize();
     // Ray-plane intersection at z=0
-    var t2 = (0 - camera.position.z) / dir.z;
+    // 大角度环绕时射线几乎与 z=0 平面平行，交点会飞到无穷远：限制 t2 的范围
+    var _dz = Math.abs(dir.z) < 0.12 ? (dir.z < 0 ? -0.12 : 0.12) : dir.z;
+    var t2 = (0 - camera.position.z) / _dz;
+    t2 = Math.max(0, Math.min(t2, 4000));
     mouseWorld.set(
       camera.position.x + dir.x*t2,
       camera.position.y + dir.y*t2,
@@ -4548,6 +4839,7 @@ window._sceneState = {
   var miniMeshes = minis.map(function(m){ return m.group.children[0]; });
 
   canvas.addEventListener('mousedown',function(e){
+    if(e.button !== 0 || e.shiftKey) return; // left-drag only; Shift+drag is reserved for camera pan
     if(hoveredIdx>=0) return; // don't drag if hovering main crystal
     miniMouse2.set(((e.clientX + CANVAS_OVERHANG * 0.5) / CW) * 2 - 1, -(e.clientY/H)*2+1);
     miniRaycaster.setFromCamera(miniMouse2, camera);
@@ -4606,14 +4898,127 @@ window._sceneState = {
   document.addEventListener('touchend',    _releaseDrag, {passive:true});
   document.addEventListener('touchcancel', _releaseDrag, {passive:true});
 
-  // ── Camera parallax ──
+  // ── Camera parallax + spatial view controls ──
   var camTx=0,camTy=0,camCx=0,camCy=0;
+  // View is composed with the existing cinematic camera; no second controller fights animate().
+  var viewYawTarget=0, viewPitchTarget=0, viewYaw=0, viewPitch=0;
+  var viewPanXTarget=0, viewPanYTarget=0, viewPanX=0, viewPanY=0;
+  var viewDistanceTarget=520, viewDistance=520;
+  var viewYawVelocity=0, viewPitchVelocity=0, viewPanXVelocity=0, viewPanYVelocity=0;
+  var _viewSuppressClick=false;
+  // ── 扩大后的可移动视角范围 ──
+  var VIEW_YAW_MAX   = Infinity;                 // 左右环绕：不设上限，可绕主体完整转 360° 以上
+  var VIEW_PITCH_MAX = Infinity;                 // 上下俯仰：不设上限，可翻过头顶/脚下完整转 360°
+  var VIEW_PAN_X = 240, VIEW_PAN_Y = 170;        // 平移
+  var VIEW_DIST_MIN = 260, VIEW_DIST_MAX = 1000; // 推近 / 拉远（可穿入石头场）
+  var _viewDrag={active:false,moved:false,mode:'orbit',downX:0,downY:0,lastX:0,lastY:0,lastTime:0};
+  var _viewTouchActive=false, _viewTouchMoved=false, _viewTouchLastX=0, _viewTouchLastY=0, _viewTouchLastTime=0, _viewTouchPinchDistance=0;
+  function _viewClamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
+  // Primary drag = orbit; Shift+drag / right-drag = translate the observer.
+  // A short click still selects crystals. Once the pointer crosses the drag threshold,
+  // the following click is suppressed so exploration never opens a panel by accident.
+  if(!isTouchDev){
+    canvas.addEventListener('mousedown', function(e){
+      if((e.button !== 0 && e.button !== 1 && e.button !== 2) || panelOpen || focusE > 0.02 || dragIdx >= 0) return;
+      _viewDrag.active = true;
+      _viewDrag.moved = false;
+      _viewDrag.mode = (e.button === 0 && !e.shiftKey) ? 'orbit' : 'pan';
+      _viewDrag.downX = _viewDrag.lastX = e.clientX;
+      _viewDrag.downY = _viewDrag.lastY = e.clientY;
+      _viewDrag.lastTime = performance.now();
+    });
+    document.addEventListener('mousemove', function(e){
+      if(!_viewDrag.active) return;
+      var dx = e.clientX - _viewDrag.lastX;
+      var dy = e.clientY - _viewDrag.lastY;
+      var total = Math.hypot(e.clientX - _viewDrag.downX, e.clientY - _viewDrag.downY);
+      if(total > 6){
+        _viewDrag.moved = true;
+        document.body.classList.add('view-dragging');
+      }
+      var now = performance.now();
+      var dt = Math.max(0.008, (now - _viewDrag.lastTime) / 1000);
+      if(_viewDrag.moved && !panelOpen && focusE < 0.02){
+        e.preventDefault();
+        if(_viewDrag.mode === 'orbit'){
+          var ay = -dx * 0.0046;
+          var ap = -dy * 0.0036;
+          viewYawTarget = (viewYawTarget + ay);
+          viewPitchTarget = (viewPitchTarget + ap);
+          viewYawVelocity = _viewClamp(ay / dt, -3.6, 3.6) * 0.46 + viewYawVelocity * 0.58;
+          viewPitchVelocity = _viewClamp(ap / dt, -2.8, 2.8) * 0.46 + viewPitchVelocity * 0.58;
+        } else {
+          var px = -dx * 0.5;
+          var py =  dy * 0.5;
+          viewPanXTarget = _viewClamp(viewPanXTarget + px, -VIEW_PAN_X, VIEW_PAN_X);
+          viewPanYTarget = _viewClamp(viewPanYTarget + py, -VIEW_PAN_Y, VIEW_PAN_Y);
+          viewPanXVelocity = _viewClamp(px / dt, -320, 320) * 0.4 + viewPanXVelocity * 0.6;
+          viewPanYVelocity = _viewClamp(py / dt, -260, 260) * 0.4 + viewPanYVelocity * 0.6;
+        }
+      }
+      _viewDrag.lastX = e.clientX;
+      _viewDrag.lastY = e.clientY;
+      _viewDrag.lastTime = now;
+    }, {passive:false});
+    document.addEventListener('mouseup', function(){
+      if(!_viewDrag.active) return;
+      var didMove = _viewDrag.moved;
+      _viewDrag.active = false;
+      _viewDrag.moved = false;
+      document.body.classList.remove('view-dragging');
+      if(didMove){
+        _viewSuppressClick = true;
+        setTimeout(function(){ _viewSuppressClick = false; }, 0);
+      }
+    });
+    window.addEventListener('blur', function(){
+      _viewDrag.active = false; _viewDrag.moved = false;
+      document.body.classList.remove('view-dragging');
+    });
+    canvas.addEventListener('contextmenu', function(e){
+      if(_viewDrag.mode === 'pan') e.preventDefault();
+    });
+    canvas.addEventListener('wheel', function(e){
+      if(panelOpen || focusE > 0.02) return;
+      e.preventDefault();
+      viewDistanceTarget = _viewClamp(viewDistanceTarget * Math.exp(e.deltaY * 0.0014), VIEW_DIST_MIN, VIEW_DIST_MAX);
+    }, {passive:false});
+  }
+
+  // 键盘：方向键 / WASD 环绕，Q/E 推拉，Shift+方向键平移，R 或 Home 复位
+  // 双击空白处（桌面）复位视角
+  var _viewKeys = {};
+  function _viewResetAll(){
+    viewYawTarget = 0; viewPitchTarget = 0; viewPanXTarget = 0; viewPanYTarget = 0; viewDistanceTarget = 520;
+    viewYawVelocity = viewPitchVelocity = viewPanXVelocity = viewPanYVelocity = 0;
+  }
+  if(!isTouchDev){
+    window.addEventListener('keydown', function(e){
+      var tg = e.target && e.target.tagName;
+      if(tg === 'INPUT' || tg === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
+      if(e.ctrlKey || e.metaKey || e.altKey) return;
+      var k = e.key.toLowerCase();
+      _viewKeys.shift = e.shiftKey;
+      if(k === 'r' || k === 'home'){ _viewResetAll(); return; }
+      if(['arrowleft','arrowright','arrowup','arrowdown','a','d','w','s','q','e'].indexOf(k) >= 0){
+        if(panelOpen || focusE > 0.02) return;
+        _viewKeys[k] = true;
+        if(k.indexOf('arrow') === 0) e.preventDefault();
+      }
+    });
+    window.addEventListener('keyup', function(e){ delete _viewKeys[e.key.toLowerCase()]; _viewKeys.shift = e.shiftKey; });
+    window.addEventListener('blur', function(){ _viewKeys = {}; });
+    canvas.addEventListener('dblclick', function(e){
+      if(panelOpen || focusE > 0.02 || hoveredIdx >= 0) return;
+      _viewResetAll();
+    });
+  }
 
   // ── Cinematic focus camera ─────────────────────────────────────────────
   // 点击石头：相机沿一条弧线绕石头小幅环绕 + 推近，镜头略收窄、轻微滚转，
   // 并把石头构图在面板之外的可见区域。关闭面板后沿原路平滑退回。
   // 用临界阻尼弹簧驱动（无过冲、可被打断），再叠一层 smoothstep 让起步更柔。
-  var _focusGrace=0, _dtS=1/60, _pinT=0, _pinW=0, _pinH=0;
   var focusCr=null, focusGoal=0, focusW=0, focusVel=0, focusE=0, focusSnap=false, _fYawSign=1;
   var _fPos=new THREE.Vector3(), _fv=new THREE.Vector3(), _fd=new THREE.Vector3();
   var _ff=new THREE.Vector3(),  _rt=new THREE.Vector3(), _fUp=new THREE.Vector3(0,1,0);
@@ -4624,7 +5029,6 @@ window._sceneState = {
     if(!focusCr || focusW < 0.002) focusSnap = true;    // 从静止开始：锁定起点
     focusCr = cr;
     focusGoal = 1;
-    _focusGrace = 4;   // 点击帧里 openPanel 会产生长帧：接下来几帧用固定步长，避免镜头被“甩”一下
     // 角落石头的名字原本是固定 CSS：聚焦开始前量一次静止位置，之后在静止位与石头下方之间混合
     if(cr.isCorner){
       var _le = labelEls[crystals.indexOf(cr)];
@@ -4678,6 +5082,7 @@ function resetIdleTimer(e){
     _mouseWasIdle = true;
   }, IDLE_DELAY_MS);
 }
+if(isTouchDev){ document.addEventListener('touchcancel', function(){ _viewTouchActive=false; _viewTouchMoved=false; _viewTouchPinchDistance=0; document.body.classList.remove('view-dragging'); }, {passive:true}); }
 document.addEventListener('mousemove',  resetIdleTimer, {passive:true});
 document.addEventListener('touchstart', resetIdleTimer, {passive:true});
 resetIdleTimer();
@@ -4744,6 +5149,16 @@ resetIdleTimer();
     document.getElementById('hint').classList.add('in');
     bgCanvas.style.filter = 'blur(0px)';
     _threeCanvas.style.filter = 'blur(0px)';
+    // 【修复】手机端：入场模糊结束后彻底移除 filter。
+    // filter:blur(0px) 仍然是“有滤镜”，整屏画布会一直走离屏滤镜渲染，
+    // 安卓 Chrome 会按瓦片(tile)分块处理，导致光晕上出现方块状闪烁亮块。
+    if(isMobile){
+      setTimeout(function(){
+        bgCanvas.style.filter = 'none';
+        _threeCanvas.style.filter = 'none';
+        _threeCanvas.style.willChange = 'transform';
+      }, 4600);
+    }
     // ident blur clears with its own slow transition (already set in CSS)
     setTimeout(function(){ _identEl.style.filter = 'blur(0px)'; }, 80);
     // Restore the lens-focus transition after opening blur is done
@@ -5032,7 +5447,12 @@ resetIdleTimer();
         // Apply vignette — clamp minimum at 0.55 so corners never go fully black
         col *= max(vignette, 0.62);
 
-        gl_FragColor = vec4(col, scene.a);
+        // 【修复】WebGL 画布默认是 premultipliedAlpha：要求 rgb <= alpha。
+        // 原先 alpha=scene.a（空白处为0）而 rgb 含泛光(>0)，属于非法的预乘颜色，
+        // 手机 GPU/合成器对此行为不一致 → 在黄色光晕上出现方块状、闪烁的亮块。
+        // 现在让 alpha 至少等于 rgb 的最大分量，保证输出始终合法。
+        float outA = clamp(max(scene.a, max(col.r, max(col.g, col.b))), 0.0, 1.0);
+        gl_FragColor = vec4(min(col, vec3(outA)), outA);
       }
     `,
     depthWrite: false, depthTest: false,
@@ -5136,26 +5556,87 @@ resetIdleTimer();
     camCx += (camTx-camCx)*.04;
     camCy += (camTy-camCy)*.04;
     // ── Focus spring ──
-    // 镜头专用 dt：限幅到 1/30 + 指数平滑，帧时间抖动/偶发长帧不会直接传到镜头位移上
-    var _dtF = Math.min(_dt, 1/30);
-    if(_focusGrace > 0){ _focusGrace--; _dtF = 1/60; _dtS = 1/60; }
-    else { _dtS += (_dtF - _dtS) * 0.25; _dtF = _dtS; }
     var _fg = (panelOpen && focusGoal === 1 && focusCr) ? 1 : 0;
     var _fo = _fg ? 4.0 : 4.8;                       // 进入稍慢、退出稍快
-    focusVel += (-_fo*_fo*(focusW - _fg) - 2*_fo*focusVel) * _dtF;
-    focusW   += focusVel * _dtF;
+    focusVel += (-_fo*_fo*(focusW - _fg) - 2*_fo*focusVel) * _dt;
+    focusW   += focusVel * _dt;
     if(focusW < 0){ focusW = 0; focusVel = 0; }
     if(focusW > 1.02) focusW = 1.02;
     if(!_fg && focusW < 0.0004 && Math.abs(focusVel) < 0.001){ focusW = 0; focusVel = 0; }
     var _fc = Math.min(1, focusW);
     focusE = _fc*_fc*(3 - 2*_fc);                     // smoothstep
 
+    // Damped observer controls. While the cinematic panel camera is active, reset the
+    // exploration rig invisibly so opening/closing a crystal remains perfectly composed.
+    var _viewBusy = _viewDrag.active || _viewTouchActive;
+    if(!panelOpen && focusE < 0.02){
+      var _kx = (_viewKeys.arrowright||_viewKeys.d ? 1 : 0) - (_viewKeys.arrowleft||_viewKeys.a ? 1 : 0);
+      var _ky = (_viewKeys.arrowup||_viewKeys.w ? 1 : 0) - (_viewKeys.arrowdown||_viewKeys.s ? 1 : 0);
+      var _kz = (_viewKeys.e ? 1 : 0) - (_viewKeys.q ? 1 : 0);
+      if(_kx || _ky || _kz){
+        if(_viewKeys.shift){
+          viewPanXTarget = _viewClamp(viewPanXTarget + _kx*160*_dt, -VIEW_PAN_X, VIEW_PAN_X);
+          viewPanYTarget = _viewClamp(viewPanYTarget + _ky*160*_dt, -VIEW_PAN_Y, VIEW_PAN_Y);
+        } else {
+          viewYawTarget   = (viewYawTarget   + _kx*1.3*_dt);
+          viewPitchTarget = (viewPitchTarget - _ky*1.0*_dt);
+        }
+        viewDistanceTarget = _viewClamp(viewDistanceTarget + _kz*320*_dt, VIEW_DIST_MIN, VIEW_DIST_MAX);
+      }
+    }
+    if(panelOpen || focusE > 0.0004){
+      // 冻结在当前视角：目标 = 当前值、速度清零。聚焦镜头以它为起点，关闭面板后也退回到它。
+      viewYawTarget = viewYaw; viewPitchTarget = viewPitch;
+      viewPanXTarget = viewPanX; viewPanYTarget = viewPanY; viewDistanceTarget = viewDistance;
+      viewYawVelocity = viewPitchVelocity = viewPanXVelocity = viewPanYVelocity = 0;
+    } else if(!_viewBusy){
+      viewYawTarget = (viewYawTarget + viewYawVelocity * _dt);
+      viewPitchTarget = (viewPitchTarget + viewPitchVelocity * _dt);
+      viewPanXTarget = _viewClamp(viewPanXTarget + viewPanXVelocity * _dt, -VIEW_PAN_X, VIEW_PAN_X);
+      viewPanYTarget = _viewClamp(viewPanYTarget + viewPanYVelocity * _dt, -VIEW_PAN_Y, VIEW_PAN_Y);
+      var _iv = Math.exp(-_dt * 2.6);
+      viewYawVelocity *= _iv; viewPitchVelocity *= _iv;
+      viewPanXVelocity *= _iv; viewPanYVelocity *= _iv;
+    }
+    var _viewLerp = 1 - Math.exp(-_dt * (_viewBusy ? 13.0 : 6.4));
+    viewYaw   += (viewYawTarget   - viewYaw)   * _viewLerp;
+    viewPitch += (viewPitchTarget - viewPitch) * _viewLerp;
+    viewPanX  += (viewPanXTarget  - viewPanX)  * _viewLerp;
+    viewPanY  += (viewPanYTarget  - viewPanY)  * _viewLerp;
+    viewDistance += (viewDistanceTarget - viewDistance) * (1 - Math.exp(-_dt*5.2));
+    // 偏航角无限制累加 → 折回 [-π, π]，视角与目标同步平移，画面不受影响
+    while(viewYaw >  Math.PI){ viewYaw -= Math.PI*2; viewYawTarget -= Math.PI*2; }
+    while(viewYaw < -Math.PI){ viewYaw += Math.PI*2; viewYawTarget += Math.PI*2; }
+    while(viewPitch >  Math.PI){ viewPitch -= Math.PI*2; viewPitchTarget -= Math.PI*2; }
+    while(viewPitch < -Math.PI){ viewPitch += Math.PI*2; viewPitchTarget += Math.PI*2; }
+    var _viewBgMix = 1 - focusE;
+    window._viewParallaxX = (-Math.sin(viewYaw) * 15 - viewPanX * 0.17) * _viewBgMix;
+    window._viewParallaxY = ( Math.sin(viewPitch) * 12 + viewPanY * 0.17) * _viewBgMix;
+
+    // ── 当前“自由视角”位姿：聚焦镜头的起点 ──
+    var _viewTargetX = camCx*.1 + viewPanX;
+    var _viewTargetY = -camCy*.1 + viewPanY;
+    var _viewRelX = (camCx + viewPanX) - _viewTargetX;
+    var _viewRelY = (-camCy + viewPanY) - _viewTargetY;
+    var _viewRelZ = viewDistance;
+    var _vyawC = Math.cos(viewYaw), _vyawS = Math.sin(viewYaw);
+    var _vpitchC = Math.cos(viewPitch), _vpitchS = Math.sin(viewPitch);
+    // 转盘式环绕：先绕 X 轴俯仰，再绕世界 Y 轴偏航。俯仰可超过 ±90°（翻过头顶），
+    // 相机“上方向”同步旋转（_viewUp），lookAt 就不会在越过正上方时突然翻转。
+    var _viewP1Y = _viewRelY*_vpitchC - _viewRelZ*_vpitchS;
+    var _viewP1Z = _viewRelY*_vpitchS + _viewRelZ*_vpitchC;
+    var _viewRotX = _viewRelX*_vyawC + _viewP1Z*_vyawS;
+    var _viewRotZ2 = -_viewRelX*_vyawS + _viewP1Z*_vyawC;
+    var _viewRotY = _viewP1Y;
+    var _vpX = _viewTargetX + _viewRotX, _vpY = _viewTargetY + _viewRotY, _vpZ = _viewRotZ2;
+    var _viewUpX = _vpitchS*_vyawS, _viewUpY = _vpitchC, _viewUpZ = _vpitchS*_vyawC;
+
     if(focusE > 0.0004 && focusCr){
       focusCr.group.getWorldPosition(_fv);
       if(focusSnap){ _fPos.copy(_fv); _fYawSign = _fv.x >= 0 ? 1 : -1; focusSnap = false; }
-      else _fPos.lerp(_fv, 1 - Math.exp(-_dtF*6));     // 跟随漂浮的石头，带一点延迟
+      else _fPos.lerp(_fv, 1 - Math.exp(-_dt*6));     // 跟随漂浮的石头，带一点延迟
 
-      var _bx = camCx, _by = -camCy, _bz = 520;
+      var _bx = _vpX, _by = _vpY, _bz = _vpZ;   // 起点：当下所在视角的相机位置
       _fd.set(_bx - _fPos.x, _by - _fPos.y, _bz - _fPos.z);
       var _r0   = _fd.length();
       var _cor  = focusCr.isCorner;                   // 角落石头离画面中心远，推近/环绕幅度收一点
@@ -5163,10 +5644,8 @@ resetIdleTimer();
       var _vis  = 0;                                  // 触屏：面板之外真正可见的区域尺寸(px)
       if(isTouchDev){
         var _pin = _panelInnerEl || (_panelInnerEl = document.querySelector('.panel-inner'));
-        var _nowMs = performance.now();
-        if(_pin && (_nowMs - _pinT > 250 || !_pinH)){ _pinT = _nowMs; _pinH = _pin.offsetHeight; _pinW = _pin.offsetWidth; }   // 缓存，避免逐帧强制布局
-        if(isMobile) _vis = Math.max(48, H - (_pin ? _pinH : H*0.91));        // 底部抽屉：只剩顶部一条
-        else         _vis = Math.max(120, W - (_pin ? _pinW : W*0.72));       // 平板侧栏：只剩左边一列
+        if(isMobile) _vis = Math.max(48, H - (_pin ? _pin.offsetHeight : H*0.91));        // 底部抽屉：只剩顶部一条
+        else         _vis = Math.max(120, W - (_pin ? _pin.offsetWidth  : W*0.72));       // 平板侧栏：只剩左边一列
         // 推近后石头不能比可见区域还大：按石头在屏幕上的直径限制推近量
         var _d0 = focusCr.scale * 2 * (H / 540);
         var _kMin = Math.min(1, _d0 / (_vis * 0.8));
@@ -5205,21 +5684,22 @@ resetIdleTimer();
         _ly -= _rt.y*_tnx*_halfW + _cu.y*_tny*_halfH;
         _lz -= _rt.z*_tnx*_halfW + _cu.z*_tny*_halfH;
       } else {
-        var _pw = Math.min(1100, Math.max(520, W*0.72));
-        var _pf = Math.min(0.9, _pw / W);
+        var _pw = Math.min(1100, Math.max(520, window.innerWidth*0.72));
+        var _pf = Math.min(0.9, _pw / window.innerWidth);
         _lx += _rt.x * _halfW * 0.5 * _pf;
         _ly += _rt.y * _halfW * 0.5 * _pf;
         _lz += _rt.z * _halfW * 0.5 * _pf;
       }
-      var _blx = camCx*.1, _bly = -camCy*.1;
+      var _blx = _viewTargetX, _bly = _viewTargetY;
+      camera.up.set(_viewUpX + (0-_viewUpX)*focusE, _viewUpY + (1-_viewUpY)*focusE, _viewUpZ + (0-_viewUpZ)*focusE).normalize();
       camera.lookAt(_blx + (_lx-_blx)*focusE, _bly + (_ly-_bly)*focusE, _lz*focusE);
       camera.rotateZ(-_fYawSign * 0.035 * focusE);    // 轻微滚转，增加镜头感
       _fq.copy(camera.quaternion);
     } else {
-      camera.position.x = camCx;
-      camera.position.y = -camCy;
-      camera.position.z = 520;
-      camera.lookAt(camCx*.1, -camCy*.1, 0);
+      // 自由视角：位姿已在上方算好
+      camera.position.set(_vpX, _vpY, _vpZ);
+      camera.up.set(_viewUpX, _viewUpY, _viewUpZ);
+      camera.lookAt(_viewTargetX, _viewTargetY, 0);
       if(focusE === 0 && focusW === 0) focusCr = focusGoal ? focusCr : null;
     }
 
@@ -5582,13 +6062,15 @@ resetIdleTimer();
       // Repulsion from mouse — applies to all
       var dx = m.group.position.x - mouseWorld.x;
       var dy = m.group.position.y - mouseWorld.y;
-      var dist2 = dx*dx + dy*dy;
+      var _dzm = (m.group.position.z - mouseWorld.z) * 0.5;   // 深度也参与：远离鼠标平面的石头受力更弱
+      var dist2 = dx*dx + dy*dy + _dzm*_dzm;
       var dist  = Math.sqrt(dist2)+0.001;
 
       if(dist < REPEL_RADIUS){
         var strength = REPEL_FORCE / (dist2+400);
         m.vx += (dx/dist)*strength;
         m.vy += (dy/dist)*strength;
+        m.vz += (_dzm/dist)*strength*0.5;
         m.pulseT = Math.min(m.pulseT+0.025, 1.0);
       } else {
         m.pulseT = Math.max(m.pulseT-0.012, 0.0);
@@ -5606,12 +6088,16 @@ resetIdleTimer();
         m.group.position.x += Math.sin(t * m.floatFx + m.floatPhX) * m.floatAxX * 0.06;
         m.group.position.y += Math.sin(t * m.floatFy + m.floatPhY) * m.floatAxY * 0.05;
 
-        // Exit bounds — must be larger than spawn distance (visW*2.2)
-        var wrapX = visW * 2.6, wrapY = visH * 2.6;
-        if( Math.abs(m.group.position.x) > wrapX ||
-            Math.abs(m.group.position.y) > wrapY ||
-            m.group.position.z > 300 ||
-            m.group.position.z < -310 ){
+        // 冒出 / 入场缩放（3D 出生动画）
+        if(m.spawnT !== undefined && m.spawnT < 1){
+          m.spawnT = Math.min(1, m.spawnT + _dt / (m.spawnDur || 1));
+          var _e = m.spawnT; _e = _e*_e*(3-2*_e);
+          m.group.scale.setScalar(Math.max(0.001, _e));
+        }
+        // 出界：离开整个 3D 球形空间（而不是 XY 方框）
+        var _p = m.group.position;
+        var _lim = _miniShellR() * 1.35;
+        if(_p.x*_p.x + _p.y*_p.y*1.3 + _p.z*_p.z > _lim*_lim){
           m.alive = false;
           m.group.visible = false;
         }
@@ -5722,6 +6208,78 @@ if(idleDriftSpeed > 0.000005){
         });
       });
     }
+
+    // ── 背景天球同步 ───────────────────────────────────────────────────
+    // 此时 camera 的位置/朝向/FOV 已包含：环绕、推拉、聚焦镜头、手持晃动、滚转、FOV 呼吸。
+    // 背景直接据此计算，并在同一帧里重绘 —— 与石头/星点层严格同步。
+    (function(){
+      camera.updateMatrixWorld(true);
+      var inv = camera.matrixWorldInverse;
+      var f0 = (H*0.5) / Math.tan(27.5*Math.PI/180);                 // 默认 FOV 55° 的焦距(px)
+      var f  = (H*0.5) / Math.tan(camera.fov*0.5*Math.PI/180);       // 当前焦距（含 FOV 呼吸/聚焦收窄）
+      var cx = CW*0.5 - CANVAS_OVERHANG*0.5, cy = H*0.5;             // three 画布比视口宽 8vw，左右各挂 4vw
+      var v = _bgTmpV;
+      var cp = camera.position;
+      var bg = window._bgView || (window._bgView = {st:{x:0,y:0,roll:0}, nb:{x:0,y:0,fade:1}});
+      // ── 星空（无穷远）：对相机每帧的转动量做积分 ──
+      // 取相机相对上一帧的转动（相机局部坐标系下的旋转向量 rx/ry/rz）：
+      //   ry 左右转 → 星空横向滑动 f0·ry；rx 抬头/低头 → 纵向滑动 f0·rx；rz 滚转 → 星空整体旋转。
+      // 不用“方位角/仰角”：那种写法在正上方/正下方有奇点，翻过头顶时会跳一下；积分在任何朝向都连续。
+      if(!bg._qPrev){ bg._qPrev = new THREE.Quaternion().copy(camera.quaternion); bg._qDq = new THREE.Quaternion(); }
+      var dq = bg._qDq.copy(bg._qPrev).conjugate().multiply(camera.quaternion);
+      bg._qPrev.copy(camera.quaternion);
+      if(dq.w < 0){ dq.x=-dq.x; dq.y=-dq.y; dq.z=-dq.z; dq.w=-dq.w; }
+      var sn = Math.sqrt(dq.x*dq.x + dq.y*dq.y + dq.z*dq.z);
+      var kk = sn < 1e-6 ? 2 : 2*Math.atan2(sn, dq.w)/sn;
+      var rvx = dq.x*kk, rvy = dq.y*kk, rvz = dq.z*kk;
+      var dsx = f0*rvy, dsy = f0*rvx;                                 // 屏幕上的滑动量
+      var c0 = Math.cos(bg.st.roll), s0 = Math.sin(bg.st.roll);
+      bg.st.x +=  dsx*c0 + dsy*s0;                                    // 换算到星空自身坐标系 R(-roll)·Δ
+      bg.st.y += -dsx*s0 + dsy*c0;
+      bg.st.roll += rvz;
+      if(bg.st.roll >  Math.PI*2) bg.st.roll -= Math.PI*2;
+      if(bg.st.roll < -Math.PI*2) bg.st.roll += Math.PI*2;
+      // ── 星云：主体后方 3500 的固定方向，用透视投影定位，只在大致朝向它时可见 ──
+      v.set(0, 0, -3500).applyMatrix4(inv);
+      var nbLen = Math.sqrt(v.x*v.x + v.y*v.y + v.z*v.z) || 1;
+      var nbDepth = Math.max(0.12, -v.z/nbLen);
+      bg.nb.x =  f * (v.x/nbLen) / nbDepth;
+      bg.nb.y = -f * (v.y/nbLen) / nbDepth;
+      var nbAng = Math.acos(Math.max(-1, Math.min(1, -v.z/nbLen)));    // 视线与星云方向的夹角
+      bg.nb.fade = Math.max(0, Math.min(1, (1.45 - nbAng) / 0.5));     // <54° 全显，>83° 完全消失（转到侧面/背面不再出现）
+      // 地平滚转：相机右向量/上向量相对世界“上”的夹角。用 atan2 → 倒置（翻过头顶）时也连续
+      _bgTmpV.set(1,0,0).applyQuaternion(camera.quaternion);
+      var _rUpY = _bgTmpV.y;
+      _bgTmpV.set(0,1,0).applyQuaternion(camera.quaternion);
+      bg.roll = Math.atan2(_rUpY, _bgTmpV.y);
+      bg.f = f; bg.f0 = f0; bg.cx = cx; bg.cy = cy; bg.ready = true;
+      // 把“默认视角下位于屏幕(px0,py0)、在主体后方 Zn 处”的天体，投影到当前相机
+      // 天体按“天球方向”处理：只取方向、不取距离 → 相机推拉/平移不会改变它的大小和屏幕位置，
+      // 只有镜头转向（环绕、晃动、滚转）才会让它在画面里移动，大小恒为 1。
+      // 星球 = 世界坐标里的真实天体：固定在默认机位(0,0,520)沿默认视线前方 3000 处。
+      // 相机环绕 / 平移 / 推拉时它有真实的视差与远近缩放；转到背对它时它在相机身后（不绘制），
+      // 但它的方向与强度仍写入 _planetLight，晶体与天空照样被它的光照亮。
+      var _plD = 3000;
+      window._bgProject = function(px0, py0, Zn){
+        var rx0 = (px0 - cx)/f0, ry0 = -(py0 - cy)/f0;
+        var il = 1/Math.sqrt(rx0*rx0 + ry0*ry0 + 1);
+        v.set(rx0*il*_plD, ry0*il*_plD, 520 - il*_plD).applyMatrix4(inv);   // 世界 → 相机坐标
+        var dist = Math.sqrt(v.x*v.x + v.y*v.y + v.z*v.z) || 1;
+        var dxn = v.x/dist, dyn = v.y/dist, dzn = v.z/dist;
+        var I = Math.max(0.6, Math.min(1.5, Math.pow(_plD/dist, 1.4)));
+        _planetLight.dir.value.set(dxn, dyn, dzn);
+        _planetLight.I.value = I;
+        var depth = -v.z;
+        if(depth < 1) return {x:cx, y:cy, s:0, dx:dxn, dy:dyn, dz:dzn, I:I};     // 在相机身后
+        var sc = (_plD*il/depth) * (f/f0);
+        var lim = Math.max(W,H)*6;
+        var sx = Math.max(-lim, Math.min(lim, cx + f*v.x/depth));
+        var sy = Math.max(-lim, Math.min(lim, cy - f*v.y/depth));
+        return { x:sx, y:sy, s:Math.min(sc,3), dx:dxn, dy:dyn, dz:dzn, I:I };
+      };
+      window._bgExternal = true;
+      if(window._bgDraw) window._bgDraw();
+    })();
 
     // ── Panel content parallax — merged into main loop, zero extra rAF cost ──
     _plxTick();
