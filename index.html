@@ -3639,6 +3639,11 @@ window._sceneState = {
       if(!e.touches || e.touches.length === 0) return;
       if(panelOpen || focusE > 0.02){
         if(e.touches.length === 1){ _viewTouchLastX=e.touches[0].clientX; _viewTouchLastY=e.touches[0].clientY; }
+        else if(e.touches.length >= 2){
+          var _pa=e.touches[0], _pb=e.touches[1];
+          _viewTouchPinchDistance = Math.hypot(_pa.clientX-_pb.clientX, _pa.clientY-_pb.clientY);
+          _viewTouchLastX = (_pa.clientX+_pb.clientX)*0.5; _viewTouchLastY = (_pa.clientY+_pb.clientY)*0.5;
+        }
         return;
       }
       if(e.touches.length === 1){
@@ -3652,6 +3657,8 @@ window._sceneState = {
           e.preventDefault();
           var now = performance.now();
           var dt = Math.max(0.008, (now - (_viewTouchLastTime || now-16)) / 1000);
+          if(Math.abs(dx) > 120) dx = 0;   // 单帧异常大位移（手指数量切换残留）直接丢弃
+          if(Math.abs(dy) > 120) dy = 0;
           var ay = -dx * 0.0032, ap = -dy * 0.00245;
           viewYawTarget = (viewYawTarget + ay);
           viewPitchTarget = (viewPitchTarget + ap);
@@ -3679,8 +3686,26 @@ window._sceneState = {
       }
     }, {passive:false});
 
+    canvas.addEventListener('touchcancel', function(){
+      _viewTouchMoved = false; _viewTouchActive = false; _viewTouchPinchDistance = 0;
+      _viewTouchLastTime = 0;
+      document.body.classList.remove('view-dragging');
+      mouse.set(-9,-9);
+    }, {passive:true});
+
     canvas.addEventListener('touchend', function(e){
-      if(e.touches && e.touches.length > 0){ mouse.set(-9,-9); return; }
+      if(e.touches && e.touches.length > 0){
+        // 双指 -> 单指：把基准点同步到剩下的手指，并清掉捏合距离，
+        // 否则下一次 touchmove 会拿"旧两指中点"算位移，视角瞬间跳到顶/底
+        var _rt = e.touches[0];
+        _viewTouchLastX = _rt.clientX; _viewTouchLastY = _rt.clientY;
+        _tsx = _rt.clientX; _tsy = _rt.clientY;
+        _viewTouchPinchDistance = 0;
+        _viewTouchLastTime = 0;
+        _viewTouchMoved = true;   // 已是多指手势，剩下的手指不能当作点击
+        mouse.set(-9,-9);
+        return;
+      }
       if(_viewTouchMoved){
         _viewTouchMoved = false; _viewTouchActive = false; _viewTouchPinchDistance = 0;
         _viewTouchLastTime = 0;
