@@ -3570,6 +3570,18 @@ window._sceneState = {
     var _tsx = 0, _tsy = 0;
     var _tsCamX = 0, _tsCamY = 0;
 
+    // 双指手势的开始/结束：把所有 target 对齐到当前位置并清零速度，
+    // 否则弹簧里残留的速度（中点抖动、抬指不同步、末帧捏合速度）会在松手后变成惯性，
+    // 把视角甩到石头群上方/下方（平移撞到边界）或乱转
+    function _viewFreezeMotion(){
+      viewYawTarget = viewYaw; viewPitchTarget = viewPitch;
+      viewPanXTarget = viewPanX; viewPanYTarget = viewPanY;
+      viewDistanceTarget = viewDistance;
+      viewYawVelocity = 0; viewPitchVelocity = 0;
+      viewPanXVelocity = 0; viewPanYVelocity = 0;
+      viewDistVelocity = 0;
+    }
+
     // ── 点击涟漪反馈 ──
     // 手指按下时在触点位置出现金色扩散圆，给触摸操作即时视觉响应
     var _rippleEl = (function(){
@@ -3621,6 +3633,7 @@ window._sceneState = {
         _viewTouchPinchDistance = 0;
       } else {
         _viewTouchMoved = true; // a multi-touch gesture must never be treated as a tap
+        _viewFreezeMotion();    // 第一指留下的 yaw/pitch 速度不能带进捏合
         var _vta = e.touches[0], _vtb = e.touches[1];
         _viewTouchPinchDistance = Math.hypot(_vta.clientX-_vtb.clientX, _vta.clientY-_vtb.clientY);
         _viewTouchLastX = (_vta.clientX+_vtb.clientX)*0.5;
@@ -3671,12 +3684,15 @@ window._sceneState = {
       } else if(e.touches.length >= 2){
         e.preventDefault();
         _viewTouchMoved = true;
+        viewYawTarget = viewYaw; viewPitchTarget = viewPitch;   // 捏合只允许改距离/平移
         var _ta=e.touches[0], _tb=e.touches[1];
         var _dist=Math.hypot(_ta.clientX-_tb.clientX, _ta.clientY-_tb.clientY);
         var _cx=(_ta.clientX+_tb.clientX)*0.5, _cy=(_ta.clientY+_tb.clientY)*0.5;
         if(_viewTouchPinchDistance > 1){
           viewDistanceTarget = _viewClamp(viewDistanceTarget * (_viewTouchPinchDistance / Math.max(1,_dist)), VIEW_DIST_MIN, VIEW_DIST_MAX);
           var _dxp=_cx-_viewTouchLastX, _dyp=_cy-_viewTouchLastY;
+          if(Math.abs(_dxp) > 40) _dxp = 0;   // 两指不同步抬起时中点会突跳，丢弃
+          if(Math.abs(_dyp) > 40) _dyp = 0;
           viewPanXTarget = _viewClamp(viewPanXTarget - _dxp*0.34, -VIEW_PAN_X*VIEW_RUBBER, VIEW_PAN_X*VIEW_RUBBER);
           viewPanYTarget = _viewClamp(viewPanYTarget + _dyp*0.34, -VIEW_PAN_Y*VIEW_RUBBER, VIEW_PAN_Y*VIEW_RUBBER);
         }
@@ -3687,6 +3703,7 @@ window._sceneState = {
     }, {passive:false});
 
     canvas.addEventListener('touchcancel', function(){
+      _viewFreezeMotion();
       _viewTouchMoved = false; _viewTouchActive = false; _viewTouchPinchDistance = 0;
       _viewTouchLastTime = 0;
       document.body.classList.remove('view-dragging');
@@ -3698,6 +3715,7 @@ window._sceneState = {
         // 双指 -> 单指：把基准点同步到剩下的手指，并清掉捏合距离，
         // 否则下一次 touchmove 会拿"旧两指中点"算位移，视角瞬间跳到顶/底
         var _rt = e.touches[0];
+        _viewFreezeMotion();      // 捏合结束：清掉缩放/平移的残余速度，不产生惯性
         _viewTouchLastX = _rt.clientX; _viewTouchLastY = _rt.clientY;
         _tsx = _rt.clientX; _tsy = _rt.clientY;
         _viewTouchPinchDistance = 0;
@@ -3707,6 +3725,7 @@ window._sceneState = {
         return;
       }
       if(_viewTouchMoved){
+        if(_viewTouchPinchDistance > 0) _viewFreezeMotion();   // 两指同时抬起：最后一次 move 还是捏合状态
         _viewTouchMoved = false; _viewTouchActive = false; _viewTouchPinchDistance = 0;
         _viewTouchLastTime = 0;
         document.body.classList.remove('view-dragging');
