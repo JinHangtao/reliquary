@@ -730,7 +730,8 @@ body::after {
 .lb.lb-flying .lb-img img{box-shadow:none !important;will-change:transform,clip-path;backface-visibility:hidden;}
 .lb.lb-flying .lb-img{will-change:clip-path;}
 .lb-bg{position:absolute;inset:0;background:rgba(4,3,3,.97);
-  backdrop-filter:blur(24px) saturate(.8);-webkit-backdrop-filter:blur(24px) saturate(.8);
+  /* [perf] 原来的全屏 backdrop-filter:blur(24px) 在 97% 不透明的黑底上几乎看不出效果，
+     却让飞行的每一帧都对整屏做模糊采样，已移除 */
   opacity:0;will-change:opacity;
   transition:opacity .3s cubic-bezier(.4,0,.2,1);}
 .lb.on .lb-bg{opacity:1;}
@@ -739,6 +740,8 @@ body::after {
 .lb-img{touch-action:none;}
 /* 缩放中：去掉大阴影 / 滤镜层 / 毛玻璃文字卡（它会盖在放大的图上，并每帧采样图片做模糊） */
 .lb.lb-zoomed .lb-img img{box-shadow:none;filter:none!important;transition:none!important;}
+/* [perf] 灯箱完全盖住后，底下面板的毛玻璃没有意义；关掉它，飞回开始时再恢复（见 _lbFlyState / openLb） */
+body.lb-cover #panel, body.lb-cover #panel *{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}
 .lb.lb-zoomed .lb-side{opacity:0!important;pointer-events:none;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;}
 .lb-img img{display:block;max-width:82vw;max-height:90vh;object-fit:contain;box-shadow:0 40px 120px rgba(0,0,0,.95);border-radius:10px;}
 @keyframes lbFadeIn{from{opacity:0;filter:blur(10px);}to{opacity:1;filter:none;}}
@@ -7566,6 +7569,7 @@ var _lbTok   = 0;      // 防竞态 token
 var _lbFromTf = '';
 function _lbFlyState(on){
   window._lbFlying = !!on;
+  if(!on && !_lbIsOn){ clearTimeout(window._lbCoverT); document.body.classList.remove('lb-cover'); }
   var e = document.getElementById('lb'); if(e) e.classList.toggle('lb-flying', !!on);
 }    // 飞回的起点 transform（灯箱里放大 / 平移过时 = 当时的内联 transform，否则空）
 var _LB_EASE = 'cubic-bezier(.32,.72,0,1)';
@@ -7778,7 +7782,7 @@ function _lbParseFilter(str){
   }
   return o;
 }
-function _lbDrive(img, t, b, dir, dur){
+function _lbDriveSlow(img, t, b, dir, dur){
   var box  = document.getElementById('lbImgBox');
   var meta = _lbThumbMeta(t);                              // 静态样式只读一次
   // 飞行期间不变的矩形：只量一次
@@ -7928,6 +7932,131 @@ function _lbDrive(img, t, b, dir, dur){
   frame(performance.now());          // 第一帧同步写入（等价于原来的 fill:'backwards'，不会闪一下终态）
   if(!h._dead && h.playState === 'running' && !h._raf) h._raf = requestAnimationFrame(frame);
   return h;
+}
+
+/* ══ [perf] 纯合成器飞行层（取代每帧改 clip-path 的主线程方案）══
+   做法：飞行时不用 #lbImg 本身，而是在 #lb 里临时建一个「窗口 W + 图片 I」两层代理：
+     · W：overflow:hidden 的窗口，只动 transform（平移 + 非等比缩放）→ 窗口矩形 = 缩略图可见区 ⇄ 整图
+     · I：W 里的图片，只动 transform（抵消 W 的非等比缩放后，屏幕上是等比缩放 + 弧线位移）
+     · 圆角用 border-radius 关键帧补偿 W 的缩放；滤镜仍是 WAAPI
+   关键帧在飞行开始时一次性算好（24 段采样，用同一条 cubic-bezier 缓动），之后全程由浏览器合成线程播放，
+   主线程再忙（Three.js、解码、GC）也不会让飞行掉帧。clip-path 不再参与动画 → 不再每帧重绘大图。
+   只在「缩略图完整可见」的常见情况走这条路；被 tab 栏遮住 / 滚出窗口 / 不存在时回退到旧的 _lbDriveSlow。
+   想对比效果：控制台执行 window._LB_FAST = false 即可切回旧方案。 */
+function _lbDriveFast(img, t, b, dir, dur){
+  if(window._LB_FAST === false || !img.animate || !t) return null;
+  var lb = document.getElementById('lb');
+  var src = img.currentSrc || img.src;
+  if(!lb || !src || src.indexOf('about:blank') === 0) return null;
+
+  var meta = _lbThumbMeta(t);
+  var m0 = document.getElementById('panelInner').getBoundingClientRect(), tb0 = document.querySelector('.panel-head').getBoundingClientRect();
+  var w = { left: Math.max(m0.left, 0), right: Math.min(m0.right, window.innerWidth),
+            top: Math.max(m0.top, tb0.bottom, 0), bottom: Math.min(m0.bottom, window.innerHeight) };
+  var a = _lbThumbRect(t, b);
+  if(!(a.left >= w.left - .5 && a.right <= w.right + .5 && a.top >= w.top - .5 && a.bottom <= w.bottom + .5)) return null;
+
+  var P = _lbPose(t, b, a, meta);
+  var F = { tx: 0, ty: 0, s: 1, r: parseFloat(getComputedStyle(img).borderRadius) || 10 };
+  if(_lbFromTf){ try{ var mx = new DOMMatrix(_lbFromTf); F.tx = mx.e; F.ty = mx.f; F.s = mx.a || 1; }catch(e){} }
+  var d = Math.hypot(P.tx, P.ty) || 1, nx = -P.ty / d, ny = P.tx / d;
+  if(ny > 0){ nx = -nx; ny = -ny; }
+  var hh = Math.min(d * _LB_ARC_K, _LB_ARC_MAX);
+  var M = { tx: P.tx * .5 + nx * hh, ty: P.ty * .5 + ny * hh, s: P.s + (1 - P.s) * _LB_MID_GROW };
+
+  var FV = _lbParseFilter(dir === 'in' ? meta.filter : (meta.rest || meta.filter));
+  var hasFilter = Math.abs(FV.b - 1) > .002 || Math.abs(FV.s - 1) > .002 || Math.abs(FV.c - 1) > .002;
+
+  var cx0 = b.left + b.width / 2, cy0 = b.top + b.height / 2, BW = b.width, BH = b.height;
+  var N = 24, kfW = [], kfI = [], kfR = [];
+  for(var i = 0; i <= N; i++){
+    var p = i / N, e = _lbEaseFn(p), u = dir === 'in' ? e : 1 - e;
+    var A, B, k;
+    if(u <= .5){ A = P; B = M; k = u * 2; } else { A = M; B = F; k = (u - .5) * 2; }
+    var tx = _lbLerp(A.tx, B.tx, k), ty = _lbLerp(A.ty, B.ty, k), sc = _lbLerp(A.s, B.s, k);
+    var c = P.ci, c0 = _lbLerp(c[0], 0, u), c1 = _lbLerp(c[1], 0, u), c2 = _lbLerp(c[2], 0, u), c3 = _lbLerp(c[3], 0, u);
+    var rS = _lbLerp(P.cr, F.r, u) * sc;                          // 屏幕上的圆角半径
+    var sl = cx0 + tx + sc * (c3 - BW / 2), sr = cx0 + tx + sc * (BW - c1 - BW / 2);
+    var st = cy0 + ty + sc * (c0 - BH / 2), sb = cy0 + ty + sc * (BH - c2 - BH / 2);
+    var sx = Math.max(sr - sl, 1) / BW, sy = Math.max(sb - st, 1) / BH;
+    var ex = (cx0 + tx - sc * BW / 2 - sl) / sx, ey = (cy0 + ty - sc * BH / 2 - st) / sy;
+    kfW.push({ offset: p, transform: 'translate(' + sl.toFixed(2) + 'px,' + st.toFixed(2) + 'px) scale(' + sx.toFixed(5) + ',' + sy.toFixed(5) + ')' });
+    kfI.push({ offset: p, transform: 'translate(' + ex.toFixed(2) + 'px,' + ey.toFixed(2) + 'px) scale(' + (sc / sx).toFixed(5) + ',' + (sc / sy).toFixed(5) + ')' });
+    kfR.push({ offset: p, borderRadius: (rS / sx).toFixed(2) + 'px / ' + (rS / sy).toFixed(2) + 'px' });
+  }
+
+  var W = document.createElement('div');
+  W.setAttribute('aria-hidden', 'true');
+  W.style.cssText = 'position:fixed;left:0;top:0;width:' + BW + 'px;height:' + BH + 'px;overflow:hidden;transform-origin:0 0;' +
+                    'pointer-events:none;z-index:3;will-change:transform;transform:' + kfW[0].transform + ';border-radius:' + kfR[0].borderRadius;
+  var I = new Image();
+  I.alt = ''; I.decoding = 'sync'; I.draggable = false; I.src = src;
+  I.style.cssText = 'position:absolute;left:0;top:0;width:' + BW + 'px;height:' + BH + 'px;max-width:none;max-height:none;' +
+                    'object-fit:contain;display:block;transform-origin:0 0;will-change:transform;transform:' + kfI[0].transform + ';border-radius:0;box-shadow:none';
+  if(!(I.complete && I.naturalWidth)) return null;      // 没命中内存缓存：不冒险，走旧方案
+  W.appendChild(I);
+
+  // ── 以下开始产生副作用 ──
+  var prevTr = img.style.transition;
+  img.style.transition = 'none';
+  img.style.opacity = '0';                              // 真图先藏起来，飞行完成的同一帧再换回
+  lb.appendChild(W);
+
+  var opt = { duration: dur, easing: 'linear', fill: 'both' };
+  var aW = W.animate(kfW, opt), aI = I.animate(kfI, opt), aR = W.animate(kfR, opt), aF = null;
+  if(hasFilter){
+    var idle = 'brightness(1) saturate(1) contrast(1)';
+    var thumbF = 'brightness(' + FV.b + ') saturate(' + FV.s + ') contrast(' + FV.c + ')';
+    try{ aF = I.animate(dir === 'in' ? [{ filter: thumbF }, { filter: idle }] : [{ filter: idle }, { filter: thumbF }],
+                        { duration: dur, easing: _LB_EASE, fill: 'both' }); }catch(e){ aF = null; }
+  }
+
+  // 飞行期间锁滚动（与旧方案一致）
+  function _stopScroll(e){ if(e.ctrlKey) return; if(e.cancelable) e.preventDefault(); }
+  var _keys = { 32: 1, 33: 1, 34: 1, 35: 1, 36: 1, 38: 1, 40: 1 };
+  function _stopKey(e){ if(_keys[e.keyCode]) e.preventDefault(); }
+  window.addEventListener('wheel',     _stopScroll, { passive: false, capture: true });
+  window.addEventListener('touchmove', _stopScroll, { passive: false, capture: true });
+  window.addEventListener('keydown',   _stopKey,    { passive: false, capture: true });
+  var cleaned = false;
+  function cleanup(){
+    if(cleaned) return; cleaned = true;
+    window.removeEventListener('wheel',     _stopScroll, { capture: true });
+    window.removeEventListener('touchmove', _stopScroll, { capture: true });
+    window.removeEventListener('keydown',   _stopKey,    { capture: true });
+    [aW, aI, aR, aF].forEach(function(x){ if(x){ x.onfinish = null; try{ x.cancel(); }catch(e){} } });
+    if(W.parentNode) W.parentNode.removeChild(W);
+  }
+
+  var box = document.getElementById('lbImgBox');
+  var h = { playState: 'running', onfinish: null, effect: null, _dead: false };
+  h.cancel = function(){
+    if(h._dead) return; h._dead = true;
+    var running = h.playState === 'running';
+    cleanup();
+    h.playState = 'idle';
+    if(running) img.style.opacity = '';                 // 中途被打断：把真图还原（已完成的由收尾逻辑自己管 opacity）
+    img.style.transform = ''; img.style.clipPath = ''; img.style.filter = ''; img.style.transition = prevTr;
+    if(box) box.style.clipPath = '';
+  };
+  aW.onfinish = function(){
+    if(h._dead || h.playState !== 'running') return;
+    h.playState = 'finished';
+    if(dir === 'out'){                                  // 真图以「缩略图姿态」接棒，供原有的落地交接（淡入缩略图/淡出飞行图）使用
+      img.style.transform = P.transform;
+      img.style.clipPath  = P.clip;
+      if(hasFilter) img.style.filter = 'brightness(' + FV.b + ') saturate(' + FV.s + ') contrast(' + FV.c + ')';
+    }
+    img.style.opacity = '';
+    cleanup();                                          // 同一任务内：代理移除 + 真图显示 → 同一帧完成交换
+    var f = h.onfinish; if(f) f.call(h);
+  };
+  return h;
+}
+function _lbDrive(img, t, b, dir, dur){
+  var h = null;
+  try{ h = _lbDriveFast(img, t, b, dir, dur); }catch(e){ h = null; }
+  return h || _lbDriveSlow(img, t, b, dir, dur);
 }
 // 打开：缩略图原位 → 灯箱位置（缩略图在哪都飞：半遮住 / 滚走了 / 在别的 tab / 不存在）
 function _lbFlyIn(idx, tok){
@@ -8268,6 +8397,8 @@ function openLb(idx){
   lb.style.visibility = 'visible';        // 不依赖 .lb 的 visibility 延迟过渡（快速开合时它会卡在 hidden）
   img.style.visibility = 'visible';
   _lbIsOn = true;
+  clearTimeout(window._lbCoverT);
+  window._lbCoverT = setTimeout(function(){ if(_lbIsOn) document.body.classList.add('lb-cover'); }, 340);
   document.body.style.overflow = 'clip';
   lb.addEventListener('touchmove', window._lbTouchMoveProxy, {passive:false});
   _lbShow(idx, true);
