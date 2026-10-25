@@ -7948,7 +7948,9 @@ function _lbCoverClip(t){
   if(a.width < 8 || a.height < 8) return null;
   var w = _lbWindow();
   var l = Math.max(a.left, w.left), r = Math.min(a.right, w.right),
-      tp = Math.max(a.top, w.top),  b = Math.min(a.bottom, w.bottom);
+      tp = (a.top < w.top - .5) ? a.top : Math.max(a.top, w.top),   // 顶部被 tab 栏盖住的那一截不再保留：tab 栏(.97 不透明)下的缩略图本就看不见，
+                                                                        // 保留它只会在 tab 栏下沿因像素取整漏出一条缩略图色细线
+      b = Math.min(a.bottom, w.bottom);
   if(r - l <= 1 || b - tp <= 1) return '';                       // 整张都被盖住/在窗口外：整张保持显示
   if(l <= a.left + .5 && r >= a.right - .5 && tp <= a.top + .5 && b >= a.bottom - .5) return null;   // 完全可见：照旧整张隐藏
   var sx = (t.offsetWidth  || a.width)  / a.width,  sy = (t.offsetHeight || a.height) / a.height;
