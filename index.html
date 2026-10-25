@@ -1327,12 +1327,12 @@ window._sceneState = {
   var _movingAssigned = 0;
 
   var tiers = isMob
-    ? [{n:14000,rMin:.02,rMax:.06,aMin:.092,aMax:.173,sp:.0015,dr:.00004,dMin:0.08,dMax:0.28},
-       {n:2800, rMin:.06,rMax:.15,aMin:.173,aMax:.368,sp:.0035,dr:.00007,dMin:0.32,dMax:0.62},
-       {n:380,  rMin:.15,rMax:.65,aMin:.380,aMax:.720,sp:.006, dr:.00012,dMin:0.68,dMax:1.00}]
-    : [{n:30000,rMin:.02,rMax:.06,aMin:.140,aMax:.260,sp:.0015,dr:.000028,dMin:0.08,dMax:0.28},
-       {n:2000, rMin:.06,rMax:.15,aMin:.260,aMax:.520,sp:.0035,dr:.000050,dMin:0.32,dMax:0.62},
-       {n:400,  rMin:.15,rMax:.65,aMin:.520,aMax:.900,sp:.006, dr:.000085,dMin:0.68,dMax:1.00}];
+    ? [{n:14000,rMin:.02,rMax:.06,aMin:.092,aMax:.173,sp:.0015,dr:.00004,dMin:0.08,dMax:0.28,gain:1.15},
+       {n:2800, rMin:.06,rMax:.15,aMin:.173,aMax:.368,sp:.0035,dr:.00007,dMin:0.32,dMax:0.62,gain:1.28},
+       {n:380,  rMin:.15,rMax:.65,aMin:.380,aMax:.720,sp:.006, dr:.00012,dMin:0.68,dMax:1.00,gain:1.38}]
+    : [{n:30000,rMin:.02,rMax:.06,aMin:.140,aMax:.260,sp:.0015,dr:.000028,dMin:0.08,dMax:0.28,gain:1.15},
+       {n:2000, rMin:.06,rMax:.15,aMin:.260,aMax:.520,sp:.0035,dr:.000050,dMin:0.32,dMax:0.62,gain:1.28},
+       {n:400,  rMin:.15,rMax:.65,aMin:.520,aMax:.900,sp:.006, dr:.000085,dMin:0.68,dMax:1.00,gain:1.38}];
   // desktop total: 13596 + 2000 + 400 = 15996 static + 4 moving = 16000
 
   // Star color types — based on Tycho-2 catalog distribution (Clarkvision.com analysis)
@@ -1363,7 +1363,7 @@ window._sceneState = {
       var star = {
         x:Math.random(), y:Math.random(),
         r:cfg.rMin+Math.random()*(cfg.rMax-cfg.rMin),
-        base:cfg.aMin+Math.random()*(cfg.aMax-cfg.aMin),
+        base:(cfg.aMin+Math.random()*(cfg.aMax-cfg.aMin))*cfg.gain,
         sp:cfg.sp*(.6+Math.random()*.8), ph:Math.random()*Math.PI*2,
         dx: isMoving ? (Math.random()-.5)*cfg.dr : 0,
         dy: isMoving ? (Math.random()-.5)*cfg.dr*.5 : 0,
@@ -1455,7 +1455,7 @@ window._sceneState = {
       _starCtx.fillStyle=g; _starCtx.fill();
     }
     _starCtx.beginPath(); _starCtx.arc(px,py,s.r,0,Math.PI*2);
-    _starCtx.fillStyle='rgba('+s.cr+','+s.cg+','+s.cb+','+Math.min(a,.75)+')';
+    _starCtx.fillStyle='rgba('+s.cr+','+s.cg+','+s.cb+','+Math.min(a,.95)+')';
     _starCtx.fill();
   });
   // Keep a reference for resize redraws — stars stored as normalised (0–1) coords so
@@ -1493,7 +1493,7 @@ window._sceneState = {
         _starCtx.fillStyle=g; _starCtx.fill();
       }
       _starCtx.beginPath(); _starCtx.arc(px,py,s.r,0,Math.PI*2);
-      _starCtx.fillStyle='rgba('+s.cr+','+s.cg+','+s.cb+','+Math.min(a,.75)+')';
+      _starCtx.fillStyle='rgba('+s.cr+','+s.cg+','+s.cb+','+Math.min(a,.95)+')';
       _starCtx.fill();
     });
   }
@@ -1760,7 +1760,7 @@ window._sceneState = {
         var _focc = 1.0 - Math.max(0, 1.0 - (Math.sqrt(_fodx*_fodx+_fody*_fody) / _occR));
         _focc = _focc * _focc;
         var _fFlicker = 1.0 + _fs.flickerAmp * Math.sin(t * _fs.flickerSp + _fs.flickerPh);
-        var _fa = Math.min(_fs.base * _focc * _fFlicker, 0.82);
+        var _fa = Math.min(_fs.base * _focc * _fFlicker, 0.96);
         if(_fa < 0.005) continue;
         if(_fs.big){
           var _fg = ctx.createRadialGradient(_fpx,_fpy,0,_fpx,_fpy,_fs.r*4);
@@ -6647,6 +6647,72 @@ resetIdleTimer();
   }
   var _dtSm = 1/60;   // 镜头弹簧用的“抗尖峰” dt
 
+  // ── [perf] 首次拖动预热 ─────────────────────────────────────────────
+  // 首次拖动卡顿 = 一批"第一次才发生"的一次性开销全砸在拖动的头几帧：
+  //   · 画面外/隐藏物体第一次进视锥：几何体上传 GPU、shader 程序链接
+  //   · composite 里 色差(uCAVel>0) / 缩放模糊(uZoom>0) 分支第一次真正执行
+  //   · 背景 2D 画布第一次带旋转+缩放+大位移绘制（Skia 第一次生成对应 GPU 管线）
+  // 做法：入场结束、静止约 1.5s 后，趁用户还没动，用"旋转后的相机 + 非零色差/缩放"把整条管线
+  // 静默跑一遍。全部发生在同一次 rAF 里，且真正的渲染在其后执行并覆盖，用户看不到任何中间帧。
+  var _dwState = 0, _dwWait = 0;
+  function _dwPipeline(){
+    renderer.setRenderTarget(fboScene);    renderer.render(scene, camera);
+    renderer.setRenderTarget(fboExtract);  renderer.render(_extractScene, _orthoCam);
+    renderer.setRenderTarget(fboDown);     renderer.render(_downScene,    _orthoCam);
+    renderer.setRenderTarget(fboDown2);    renderer.render(_down2Scene,   _orthoCam);
+    renderer.setRenderTarget(fboUp2);      renderer.render(_up2Scene,     _orthoCam);
+    renderer.setRenderTarget(fboUp);       renderer.render(_upScene,      _orthoCam);
+    renderer.setRenderTarget(null);        renderer.render(_quadScene,    _orthoCam);
+  }
+  function _dwRun(doThree, doBg){
+    var cu = _matComposite.uniforms;
+    var sp = camera.position.clone(), sq = camera.quaternion.clone();
+    var sCA = cu.uCAVel.value, sZ = cu.uZoom.value;
+    var bg = window._bgView;
+    var sb = bg ? { x:bg.st.x, y:bg.st.y, r:bg.st.roll, nx:bg.nb.x, ny:bg.nb.y, nf:bg.nb.fade, roll:bg.roll, f:bg.f } : null;
+    var flipped = [], hidden = [];
+    try{
+      // 转到一个大角度（含滚转）：几乎所有石头都会进出视锥
+      camera.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.5, 1.1, 0.4)));
+      camera.updateMatrixWorld(true);
+      if(doThree){
+        scene.traverse(function(o){
+          if(o.frustumCulled){ o.frustumCulled = false; flipped.push(o); }
+          if(!o.visible && o.material && o.geometry){ o.visible = true; hidden.push(o); }
+        });
+        cu.uCAVel.value = 1; cu.uZoom.value = 0.4; cu.uZoomCenter.value.set(0.5, 0.5);
+        _dwPipeline();
+      }
+      if(doBg && bg && window._bgDraw){
+        bg.st.x += 380; bg.st.y -= 210; bg.st.roll += 0.5;
+        bg.nb.x += 300; bg.nb.y -= 160; bg.nb.fade = 1; bg.roll += 0.5; bg.f *= 1.08;
+        window._bgDraw();
+      }
+    } finally {
+      flipped.forEach(function(o){ o.frustumCulled = true; });
+      hidden.forEach(function(o){ o.visible = false; });
+      camera.position.copy(sp); camera.quaternion.copy(sq);
+      camera.updateMatrixWorld(true);
+      cu.uCAVel.value = sCA; cu.uZoom.value = sZ;
+      if(sb){
+        bg.st.x = sb.x; bg.st.y = sb.y; bg.st.roll = sb.r;
+        bg.nb.x = sb.nx; bg.nb.y = sb.ny; bg.nb.fade = sb.nf; bg.roll = sb.roll; bg.f = sb.f;
+      }
+      renderer.setRenderTarget(null);
+      if(doBg && window._bgDraw) window._bgDraw();   // 立刻按真实姿态重画背景，覆盖预热帧
+    }
+  }
+  function _dwTick(){
+    if(_dwState >= 3) return;
+    if(_viewDrag.active || _viewTouchActive || panelOpen || focusE > 0.0004){ if(_viewDrag.active || _viewTouchActive) _dwState = 3; _dwWait = 0; return; }
+    if(_dwState === 0){
+      if(introsDone && ++_dwWait > 36) _dwState = 1;           // 入场结束后静止约 0.6s（更早预热，覆盖"一进来就拖"的用户）
+      return;
+    }
+    if(_dwState === 1){ _dwState = 2; try{ _dwRun(true, false); }catch(e){ console.warn('warmup(three):', e); } return; }
+    if(_dwState === 2){ _dwState = 3; try{ _dwRun(false, true); }catch(e){ console.warn('warmup(bg):', e); } }
+  }
+
   function animate(){
     requestAnimationFrame(animate);
     if(window._lbOpen || window._lbFlying){ clock.getDelta(); return; }
@@ -7513,6 +7579,9 @@ if(idleDriftSpeed > 0.000005){
       _v4.set((_w.x + CANVAS_OVERHANG*0.5) / CW, 1 - _w.y / H, _w.radius / H,
               _w.strength * _in * _fa * _caReduce);
     }
+
+    // ── [perf] 首次拖动预热（拆成两帧：先 WebGL，后背景 2D）──
+    _dwTick();
 
     // ── Bloom pipeline — 7 passes, Dual Kawase ──
     _matComposite.uniforms.uCATime.value = t;
@@ -9756,14 +9825,16 @@ function _sliceLoop(n, body, done){
   var i = 0;
   function later(){
     // 用户已经点击、正等着出声：不再等空闲，直接用 setTimeout 加大每片预算
-    if(_audioWanted) setTimeout(step, 0);
+    // 【修复】原来用户一点击就改成「setTimeout(0) + 每片 10ms」，等于首次拖动期间主线程每帧被占掉大半 → 掉帧。
+    // 现在无论是否已有手势，每片都只给 ≤2.5ms，并留出间隙（真正的重活已移到 Worker，这里只是兜底）
+    if(_audioWanted) setTimeout(step, 6);
     else if(window.requestIdleCallback) requestIdleCallback(step, {timeout:300});
     else setTimeout(step, 8);
   }
   function step(dl){
     var t0 = performance.now();
-    var budget = _audioWanted ? 10
-               : ((dl && dl.timeRemaining) ? Math.max(2, dl.timeRemaining() - 1) : 3);
+    var budget = _audioWanted ? 2.5
+               : ((dl && dl.timeRemaining) ? Math.max(2, Math.min(6, dl.timeRemaining() - 1)) : 3);
     while(i < n){
       var end = Math.min(n, i + 4096);
       for(; i < end; i++) body(i);
@@ -9807,7 +9878,66 @@ function _makeCosmicIRAsync(cb){
   })();
 }
 
+/* ── Worker 生成：把约 200 万点的噪声 / 混响 IR 计算整个搬出主线程 ──
+   算法与 _makeCosmicIRAsync / 棕噪声 / 扫频噪声完全一致，只是在 Worker 里一口气算完，
+   结果以 Float32Array 转移回来，主线程只做 createBuffer + copyToChannel（内存拷贝，几毫秒）。 */
+function _prepareAmbientBuffersWorker(done, fail){
+  var src = '(' + function(){
+    self.onmessage = function(ev){
+      var sr = ev.data.sr, out = {};
+      function brown(len, k, g, fade){
+        var a = new Float32Array(len), last = 0;
+        for(var i=0;i<len;i++){ last = (last + k*(Math.random()*2-1)) / (1+k); a[i] = last * g; }
+        var x = Math.min(4096, Math.floor(len*fade));
+        for(var j=0;j<x;j++){ var f=j/x; a[j]*=f; a[len-1-j]*=f; }
+        return a;
+      }
+      out.n  = brown(sr*4, 0.02, 3.8, 0.03);
+      out.sw = brown(sr*8, 0.018, 4, 0.02);
+      var len = sr*16, pre = Math.floor(sr*0.20), swl = Math.floor(sr*0.30), ir = [];
+      for(var c=0;c<2;c++){
+        var d = new Float32Array(len), ns = c===0 ? 0.0 : 0.3719;
+        for(var i=0;i<len;i++){
+          if(i < pre){ d[i] = 0; continue; }
+          var pos = i - pre, pn = pos / (len - pre);
+          var sw = pos < swl ? pos/swl : 1; sw = sw*sw*(3-2*sw);
+          ns += 0.018*(Math.random()*2-1); ns /= 1.018;
+          d[i] = sw * (ns*4.2*Math.exp(-pn*6.0)*0.55 + (Math.random()*2-1)*Math.exp(-pn*18.0)*0.30 + (Math.random()*2-1)*Math.exp(-pn*55.0)*0.15);
+          if(c===1) d[i] *= 0.88 + Math.random()*0.06;
+        }
+        ir.push(d);
+      }
+      out.ir = ir;
+      self.postMessage(out, [out.n.buffer, out.sw.buffer, ir[0].buffer, ir[1].buffer]);
+    };
+  } + ')()';
+  var w, url;
+  try{
+    url = URL.createObjectURL(new Blob([src], {type:'text/javascript'}));
+    w = new Worker(url);
+  }catch(e){ if(url) URL.revokeObjectURL(url); fail(); return; }
+  var sr = AC.sampleRate, ended = false;
+  function kill(){ try{ w.terminate(); }catch(e){} URL.revokeObjectURL(url); }
+  w.onerror = function(){ if(ended) return; ended = true; kill(); fail(); };
+  w.onmessage = function(ev){
+    if(ended) return; ended = true; kill();
+    try{
+      var o = ev.data, prep = {};
+      prep.nBuf = AC.createBuffer(1, o.n.length, sr);   prep.nBuf.copyToChannel(o.n, 0);
+      prep.swBuf = AC.createBuffer(1, o.sw.length, sr); prep.swBuf.copyToChannel(o.sw, 0);
+      prep.irBuf = AC.createBuffer(2, o.ir[0].length, sr);
+      prep.irBuf.copyToChannel(o.ir[0], 0); prep.irBuf.copyToChannel(o.ir[1], 1);
+      done(prep);
+    }catch(e){ fail(); }
+  };
+  w.postMessage({sr: sr});
+}
+
 function _prepareAmbientBuffers(done){
+  _prepareAmbientBuffersWorker(done, function(){ _prepareAmbientBuffersSliced(done); });
+}
+
+function _prepareAmbientBuffersSliced(done){
   var sr = AC.sampleRate, prep = {};
   // 1) 棕噪声（星星呼吸）
   var nLen = sr * 4;
@@ -9849,9 +9979,15 @@ function prewarmAudio(){
       if(_audioWanted && _ambBuilt && _ambActivate) _ambActivate();
     };
     // Convolver 装载 IR 是主线程重活 —— 没人等声音时放到空闲；用户已点击则立刻执行
-    if(_audioWanted) run();
-    else if(window.requestIdleCallback) requestIdleCallback(run, {timeout:2000});
-    else setTimeout(run, 50);
+    // 【修复】原来已点击就同步 run()：buildAmbient 里给 16s 立体声 Convolver 装载 IR（主线程做分区 FFT，几十~上百 ms）
+    // 恰好落在首次拖动的头几帧。现在：用户正在拖动 / 镜头在动时一律等，等到停手后的空闲再装载。
+    var tries = 0;
+    function safeRun(){
+      var busy = document.body.classList.contains('view-dragging') || window._lbFlying;
+      if(busy && tries++ < 150){ setTimeout(safeRun, 200); return; }
+      if(window.requestIdleCallback) requestIdleCallback(run, {timeout:1500}); else setTimeout(run, 30);
+    }
+    safeRun();
   });
 }
 
