@@ -7750,15 +7750,47 @@ function _lbBoxFrames(a, dir){
   return dir === 'in' ? [{ clipPath: small }, { clipPath: full }]
                       : [{ clipPath: full },  { clipPath: small }];
 }
+/* ── 被遮住的那一截保持可见（修复：半遮挡缩略图点击 / 飞回时闪一下）──
+   缩略图被 tab 栏（磨砂）盖住 / 露头在窗口边缘时，飞行图只负责「可见矩形」，
+   被盖住的那一截以前随整张缩略图一起 visibility:hidden → 点击瞬间那截从磨砂栏下突然消失，
+   飞回落地时又突然冒出来 = 闪烁。现在用 clip-path(evenodd) 只让「被遮住的部分」继续显示，
+   可见部分仍由飞行图接管，两者无缝拼接。 */
+var _lbThumbPartial = false;
+function _lbCoverClip(t){
+  if(!t) return null;
+  var a = t.getBoundingClientRect();
+  if(a.width < 8 || a.height < 8) return null;
+  var w = _lbWindow();
+  var l = Math.max(a.left, w.left), r = Math.min(a.right, w.right),
+      tp = Math.max(a.top, w.top),  b = Math.min(a.bottom, w.bottom);
+  if(r - l <= 1 || b - tp <= 1) return '';                       // 整张都被盖住/在窗口外：整张保持显示
+  if(l <= a.left + .5 && r >= a.right - .5 && tp <= a.top + .5 && b >= a.bottom - .5) return null;   // 完全可见：照旧整张隐藏
+  var sx = (t.offsetWidth  || a.width)  / a.width,  sy = (t.offsetHeight || a.height) / a.height;
+  var W = a.width * sx, H = a.height * sy;
+  var il = (l - a.left) * sx, it = (tp - a.top) * sy, ir = (r - a.left) * sx, ib = (b - a.top) * sy;
+  return 'path(evenodd, "M0 0H' + W.toFixed(1) + 'V' + H.toFixed(1) + 'H0Z M' + il.toFixed(1) + ' ' + it.toFixed(1) +
+         'H' + ir.toFixed(1) + 'V' + ib.toFixed(1) + 'H' + il.toFixed(1) + 'Z")';
+}
+function _lbApplyCover(t){
+  _lbThumbPartial = false;
+  if(!t) return;
+  var c = null;
+  try{ c = _lbCoverClip(t); }catch(e){ c = null; }
+  if(c === null){ t.style.visibility = 'hidden'; t.style.removeProperty('clip-path'); return; }
+  t.style.visibility = '';
+  if(c) t.style.setProperty('clip-path', c, 'important'); else t.style.removeProperty('clip-path');
+  _lbThumbPartial = true;
+}
 function _lbHideThumb(t){
   if(window._lbKeepTh && window._lbKeepTh !== t){ window._lbKeepTh.style.willChange = ''; }
   window._lbKeepTh = null;
-  if(_lbThumb && _lbThumb !== t) _lbThumb.style.visibility = '';
+  if(_lbThumb && _lbThumb !== t){ _lbThumb.style.visibility = ''; _lbThumb.style.removeProperty('clip-path'); }
   _lbThumb = t || null;
-  if(t) t.style.visibility = 'hidden';
+  if(t) _lbApplyCover(t);
 }
 function _lbRestoreThumb(){
-  if(_lbThumb){ _lbThumb.style.visibility = ''; _lbThumb = null; }
+  if(_lbThumb){ _lbThumb.style.visibility = ''; _lbThumb.style.removeProperty('clip-path'); _lbThumb = null; }
+  _lbThumbPartial = false;
   if(window._healGridImgs){ setTimeout(window._healGridImgs, 0); setTimeout(window._healGridImgs, 400); }
 }
 var _lbTail = null;    // 飞回「落地交接」阶段的句柄：{ fade: 灯箱图淡出动画, th: 缩略图, timer: 延迟定时器 }
@@ -8282,6 +8314,7 @@ function _lbFlyOut(){
   var img = document.getElementById('lbImg');
   var t   = _lbThumbOf(curLbIdx);
   _lbCancelAnim();
+  if(t && t === _lbThumb) _lbApplyCover(t);   // 页面可能滚过：按此刻位置重算「被遮住的那一截」
   // 切图后 img 带着 .lb-fadein（CSS animation, fill:both 会一直把 opacity 钉在 1，
   // 且优先级高于内联 style）。不先摘掉，飞回结束后设的 opacity:0 会被它盖住 → 屏幕中央闪一帧。
   img.classList.remove('lb-fadein');
@@ -8310,7 +8343,7 @@ function _lbFlyOut(){
               （飞行图是高分辨率大图缩放而来，与缩略图的栅格化有亚像素差，硬切会有一次细微「跳」）
            ④ 整个交接期间保持 _lbFlying=true：滚动模糊 / 标题压缩等主线程任务继续让路，
               不会在淡入的同时抢帧；交接完成后才恢复 */
-        var th = _lbThumb, IN = 180, OUT = 170, OVERLAP = 60;
+        var th = _lbThumb, IN = 180, OUT = 170, OVERLAP = 60, _partial = _lbThumbPartial;
         var tail = _lbTail = { fade: null, th: th, timer: 0, thAnim: null, off: null };
         var restF = 'none';
         if(th){
@@ -8320,7 +8353,7 @@ function _lbFlyOut(){
           th.style.setProperty('filter', restF, 'important');
           th.style.willChange = 'opacity';
           _lbRestoreThumb();                         // visibility 还原（此时仍被飞行图盖住）
-          try{
+          if(!_partial) try{   // 半遮挡：被遮住那截一直可见，再做 0→1 淡入反而会让它先消失再出现（闪烁）
             tail.thAnim = th.animate([{ opacity: 0 }, { opacity: 1 }], { duration: IN, easing: 'cubic-bezier(.33,0,.2,1)' });
           }catch(e){}
         }
