@@ -7885,8 +7885,16 @@ function _lbCalcWindow(){
     var fr = fd.getBoundingClientRect();
     if(fr.height > 0 && fr.top > top && fr.top < bottom && parseFloat(getComputedStyle(fd).opacity) > 0.05) bottom = fr.top;
   }
+  // 吸附到设备像素：tab 栏下沿常是小数坐标（如 63.6px）。窗口边缘落在半个像素上时，
+  // 飞行图（及其合成层）的抗锯齿会在 tab 栏下沿漏出一条 1px 的「图片色」细线，只在 FLIP 期间出现。
+  // 上沿向下、下沿向上取整 → 飞行图永远不会压到 tab 栏 / 底部渐隐遮罩上；
+  // 缩略图的「被遮住那一截」(_lbCoverClip) 用的是同一个窗口，所以两者仍然严丝合缝。
+  var dpr = window.devicePixelRatio || 1;
+  top = Math.ceil(top * dpr - 0.02) / dpr;
+  bottom = Math.floor(bottom * dpr + 0.02) / dpr;
   return { left: Math.max(m.left, 0), right: Math.min(m.right, window.innerWidth), top: top, bottom: bottom };
 }
+function _lbSnapPx(v){ var d = window.devicePixelRatio || 1; return Math.round(v * d) / d; }
 function _lbWindow(){
   if(_lbWinCache) return _lbWinCache;
   return _lbCalcWindow();
@@ -8263,7 +8271,11 @@ function _lbDriveSlow(img, t, b, dir, dur){
         vt = cl(a.top, w.top, w.bottom),  vb = cl(a.bottom, w.top, w.bottom);
     var s0 = [vt - bx.top, bx.right - vr, bx.bottom - vb, vl - bx.left];
     var f0 = [-bx.top, bx.right - VW, bx.bottom - VH, -bx.left];
-    var boxClip = 'inset(' + [0,1,2,3].map(function(i){ return _lbLerp(s0[i], f0[i], u).toFixed(1) + 'px'; }).join(' ') + ')';
+    var boxClip = 'inset(' + [0,1,2,3].map(function(i){
+      var v = _lbLerp(s0[i], f0[i], u);
+      var o = (i === 0) ? bx.top : (i === 1 ? -bx.right : (i === 2 ? -bx.bottom : bx.left));   // 换算到屏幕坐标再吸附
+      return (_lbSnapPx(v + o) - o).toFixed(2) + 'px';
+    }).join(' ') + ')';
 
     // ── 写（img 与 box 同帧、一次写完）──
     img.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) scale(' + sc.toFixed(4) + ')';
@@ -8346,7 +8358,7 @@ function _lbDriveFast(img, t, b, dir, dur){
     // 遮挡窗（方角）：上边缘 w.top → 0，下边缘 w.bottom → VH，与 img 同一个进度 u。
     // 关键：窗口只做【纯平移】——高 = 整个视口的容器上下平移，裁切边缘随之移动；
     // 里面的 W 用同量反向平移抵消，因此没有任何非等比缩放 / 反向放大几十倍的图层，合成器不必反复栅格化超大图层。
-    var dT = needTop ? _lbLerp(w.top, 0, u) : 0, dB = needBot ? _lbLerp(w.bottom, VH, u) - VH : 0;
+    var dT = needTop ? _lbSnapPx(_lbLerp(w.top, 0, u)) : 0, dB = needBot ? _lbSnapPx(_lbLerp(w.bottom, VH, u)) - VH : 0;
     var par = needTop ? dT : (needBot ? dB : 0);          // 最内层窗口的屏幕偏移
     if(needBot) kfOb.push({ offset: p, transform: 'translate(0px,' + dB.toFixed(2) + 'px)' });
     if(needTop) kfOt.push({ offset: p, transform: 'translate(0px,' + (dT - (needBot ? dB : 0)).toFixed(2) + 'px)' });
