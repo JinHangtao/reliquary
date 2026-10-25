@@ -575,6 +575,15 @@ body::after {
 }
 .clp-wrap.expanded::after { opacity:0; }
 
+/* 折叠状态下，正文里被裁掉的图片/加载骨架整体隐藏，避免在渐变下面露出白条。
+   展开：立刻显示；折叠：等 max-height 动画(.52s)结束后再隐藏。 */
+[data-exp="0"] .pi-wrap,
+[data-exp="0"] .pi-skel,
+[data-exp="0"] > img { visibility:hidden; transition:visibility 0s linear .52s; }
+[data-exp="1"] .pi-wrap,
+[data-exp="1"] .pi-skel,
+[data-exp="1"] > img { visibility:visible; transition:visibility 0s; }
+
 /* ── Collapse / Read-more buttons — cursor managed here, not in inline style ── */
 /* inline style cursor:pointer is stripped from JS; this rule owns it instead    */
 @media (pointer:fine)   { [data-clp-body] { cursor:none;    } }
@@ -4278,8 +4287,8 @@ window._sceneState = {
                   +'<div style="flex:1;height:1px;background:rgba(196,154,82,.18)"></div>'
                   +'</div>';
               } else if(item.indexOf('<img') === 0){
-                // raw img tag — inject directly
-                bodyHtml += item;
+                // raw img tag — inject directly (eager: lazy images clipped by the collapsed body never load)
+                bodyHtml += item.replace('loading="lazy"', 'loading="eager"');
               } else {
                 // regular paragraph, may contain <a>, <em> etc
                 bodyHtml += '<p style="font-family:Jost,sans-serif;font-weight:300;font-size:.82rem;line-height:2.15;color:#dedad0;letter-spacing:.02em;margin-bottom:10px">'+item+'</p>';
@@ -4296,7 +4305,7 @@ window._sceneState = {
           if(isLong) html += '<div id="'+wrapId+'" class="clp-wrap">';
           html += '<div id="'+pid2+'" style="font-family:Jost,sans-serif;font-weight:300;font-size:.82rem;line-height:2.15;color:#dedad0;overflow:hidden;letter-spacing:.02em;'
             +(isLong ? 'max-height:'+collapsedH+';' : '')
-            +'transition:max-height .52s cubic-bezier(.4,0,.2,1)">'+bodyHtml+'</div>';
+            +'transition:max-height .52s cubic-bezier(.4,0,.2,1)"'+(isLong ? ' data-exp="0"' : '')+'>'+bodyHtml+'</div>';
           if(isLong) html += '</div>';
           if(isLong){
             html += '<button id="'+btn2+'"'
