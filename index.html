@@ -729,8 +729,10 @@ body::after {
 .lb.on .lb-img img{visibility:visible;will-change:transform,clip-path;}
 .lb.lb-flying .lb-img img{box-shadow:none !important;will-change:transform,clip-path;backface-visibility:hidden;}
 .lb.lb-flying .lb-img{will-change:clip-path;}
+.lb.lb-flying .lb-side{-webkit-backdrop-filter:none!important;backdrop-filter:none!important;}
 .lb-bg{position:absolute;inset:0;background:rgba(4,3,3,.97);
-  backdrop-filter:blur(24px) saturate(.8);-webkit-backdrop-filter:blur(24px) saturate(.8);
+  /* [perf] 原 backdrop-filter:blur(24px) 已移除：底色 .97 不透明，模糊几乎不可见，
+     但它在飞入/飞回的头 300ms 淡入淡出，每帧都要对 WebGL 画布 + 面板毛玻璃做全屏重采样，是掉帧主因 */
   opacity:0;will-change:opacity;
   transition:opacity .3s cubic-bezier(.4,0,.2,1);}
 .lb.on .lb-bg{opacity:1;}
@@ -7736,10 +7738,10 @@ function _lbFitSide(){
   }
 }
 window.addEventListener('resize', function(){ if(window._lbIsOn || (typeof _lbIsOn !== 'undefined' && _lbIsOn)) _lbFitSide(); }, {passive:true});
-function _lbShowSide(tok, delay){
+function _lbShowSide(tok, delay, preFitted){
   setTimeout(function(){
     if(tok !== _lbTok || !_lbIsOn) return;
-    _lbFitSide();
+    if(!preFitted) _lbFitSide();
     document.getElementById('lbSide').style.opacity = '1';
     var _b = document.querySelector('.lb-btns'); if(_b){ _b.style.pointerEvents = ''; _b.style.opacity = '1'; }
   }, delay);
@@ -7987,7 +7989,9 @@ function _lbDriveFast(img, t, b, dir, dur){
   var w = { left: Math.max(m0.left, 0), right: Math.min(m0.right, window.innerWidth),
             top: Math.max(m0.top, tb0.bottom, 0), bottom: Math.min(m0.bottom, window.innerHeight) };
   var a = _lbThumbRect(t, b);
-  if(!(a.left >= w.left - .5 && a.right <= w.right + .5 && a.top >= w.top - .5 && a.bottom <= w.bottom + .5)) return null;
+  // 可见部分必须有面积；完全在窗口外（零面积）仍交给旧方案处理
+  if(Math.min(a.right, w.right) - Math.max(a.left, w.left) < 2 || Math.min(a.bottom, w.bottom) - Math.max(a.top, w.top) < 2) return null;
+  var VW = window.innerWidth, VH = window.innerHeight;
 
   var P = _lbPose(t, b, a, meta);
   var F = { tx: 0, ty: 0, s: 1, r: parseFloat(getComputedStyle(img).borderRadius) || 10 };
@@ -8011,6 +8015,10 @@ function _lbDriveFast(img, t, b, dir, dur){
     var rS = _lbLerp(P.cr, F.r, u) * sc;                          // 屏幕上的圆角半径
     var sl = cx0 + tx + sc * (c3 - BW / 2), sr = cx0 + tx + sc * (BW - c1 - BW / 2);
     var st = cy0 + ty + sc * (c0 - BH / 2), sb = cy0 + ty + sc * (BH - c2 - BH / 2);
+    // 遮挡窗：起点 = tab 栏/容器之内的可见区，飞行中平滑展开到整个视口（与旧方案的 box 裁切窗一致，但全程在合成器上）
+    var wl = _lbLerp(w.left, 0, u), wt = _lbLerp(w.top, 0, u), wr = _lbLerp(w.right, VW, u), wb = _lbLerp(w.bottom, VH, u);
+    if(sl < wl) sl = wl; if(st < wt) st = wt; if(sr > wr) sr = wr; if(sb > wb) sb = wb;
+    if(sr < sl + 1) sr = sl + 1; if(sb < st + 1) sb = st + 1;
     var sx = Math.max(sr - sl, 1) / BW, sy = Math.max(sb - st, 1) / BH;
     var ex = (cx0 + tx - sc * BW / 2 - sl) / sx, ey = (cy0 + ty - sc * BH / 2 - st) / sy;
     kfW.push({ offset: p, transform: 'translate(' + sl.toFixed(2) + 'px,' + st.toFixed(2) + 'px) scale(' + sx.toFixed(5) + ',' + sy.toFixed(5) + ')' });
@@ -8120,6 +8128,7 @@ function _lbFlyIn(idx, tok){
   _lbHideThumb(t);
   img.style.opacity = '';
   _lbCancelAnim();
+  _lbFitSide();                          // [perf] 强制布局的量尺放在飞行开始前（文字栏此时仍透明）
   _lbFlyState(true);
   var anim = _lbDrive(img, t, b, 'in', 440);    // 逐帧驱动：img + 遮挡窗同帧更新，实时跟随缩略图
   _lbAnimBox = anim; _lbAnim = anim;
@@ -8134,7 +8143,7 @@ function _lbFlyIn(idx, tok){
       img.style.opacity = '';
     }
   };
-  _lbShowSide(tok, 240);
+  _lbShowSide(tok, 240, true);
 }
 // 关闭：灯箱位置 → 缩略图原位。返回动画时长（0 = 没有飞，只淡出）
 function _lbFlyOut(){
