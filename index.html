@@ -757,6 +757,16 @@ body::after {
 .lb-en{font-family:'Jost',sans-serif;font-weight:300;font-size:.55rem;letter-spacing:.22em;text-transform:uppercase;color:var(--fg-d);margin-bottom:8px}
 .lb-rule{height:1px;background:var(--line2);margin-bottom:16px}
 .lb-desc{font-family:'Jost',sans-serif;font-weight:300;font-size:.67rem;line-height:2.1;color:var(--fg-d);letter-spacing:.04em;white-space:pre-line}
+/* 仅电脑端（>768px）：缩短介绍文字展示长度与横线长度，手机端保持原样 */
+@media (min-width:769px){
+  .lb-rule{width:56px;margin-bottom:12px}
+  .lb-desc{line-height:1.9;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;line-clamp:6;overflow:hidden}
+  /* 横图：文字在图片下方（JS 把 #lbSide 设为 position:static）→ 只展示 3 行 */
+  .lb-side[style*="position: static"] .lb-desc{-webkit-line-clamp:3;line-clamp:3;max-width:min(100%,520px);line-height:1.8}
+  .lb-side[style*="position: static"] .lb-title{font-size:1.25rem}
+  .lb-side[style*="position: static"] .lb-en{margin-bottom:6px}
+  .lb-side[style*="position: static"] .lb-rule{margin-bottom:10px}
+}
 /* 介绍文字：错落淡入（标题 → 英文名 → 分隔线展开 → 正文），关闭/切图时整体快速淡出。
    JS 只切换 #lbSide 的内联 opacity（0 / 1），这里用属性选择器驱动子元素各自的过渡。 */
 .lb-title,.lb-en,.lb-desc{opacity:0;transform:translateY(8px);
