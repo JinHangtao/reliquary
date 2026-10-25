@@ -8350,9 +8350,11 @@ function _lbFlyOut(){
         if(th){
           var tm = _lbThumbMeta(th);
           restF = tm.rest || tm.filter || 'none';
-          th.style.setProperty('transition', 'filter 0s', 'important');
-          th.style.setProperty('filter', restF, 'important');
-          th.style.willChange = 'opacity';
+          if(!_partial){   // 半遮挡缩略图：不动 filter / will-change（避免图层提升与磨砂层重采样引起闪烁），整个交接保持原样
+            th.style.setProperty('transition', 'filter 0s', 'important');
+            th.style.setProperty('filter', restF, 'important');
+            th.style.willChange = 'opacity';
+          }
           _lbRestoreThumb();                         // visibility 还原（此时仍被飞行图盖住）
           if(!_partial) try{   // 半遮挡：被遮住那截一直可见，再做 0→1 淡入反而会让它先消失再出现（闪烁）
             tail.thAnim = th.animate([{ opacity: 0 }, { opacity: 1 }], { duration: IN, easing: 'cubic-bezier(.33,0,.2,1)' });
@@ -8399,13 +8401,20 @@ function _lbFlyOut(){
         tail.timer = setTimeout(function(){
           tail.timer = 0;
           if(_lbTail !== tail) return;               // 期间被取消（又打开了灯箱）
+          if(_partial){
+            /* 半遮挡：飞行图带着 clip-path + 外层遮挡窗 + filter，再对它做 opacity 动画会让手机 GPU
+               反复重建离屏渲染面，滤镜结果跳变 = 闪一下。改为「原子交接」：缩略图此刻已完整显示在下方，
+               等两帧让它先绘制完成，再一次性撤掉飞行图，全程没有任何透明度渐变。 */
+            requestAnimationFrame(function(){ requestAnimationFrame(_finish); });
+            return;
+          }
           try{
             fadeAnim = img.animate([{ opacity: 1 }, { opacity: 0 }],
                                    { duration: OUT, easing: 'cubic-bezier(.4,0,.6,1)', fill: 'forwards' });
             tail.fade = fadeAnim;
             fadeAnim.onfinish = function(){ _finish(); };
           }catch(e){ _finish(); }
-        }, Math.max(0, IN - OVERLAP));
+        }, _partial ? 0 : Math.max(0, IN - OVERLAP));
       };
       return 300 + (180 - 60) + 170 + 60;   // 飞行 300 + 缩略图淡入先行 120 + 飞行图淡出 170 + 余量
     }
