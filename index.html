@@ -1023,12 +1023,12 @@ function esc(str) {
   var curScaleC = 1.0;  // inner dot scale current (lerped)
   var ringScaleC= 1.0;  // ring scale current (lerped)
 
+  // [perf] 位置改用 transform（合成器属性），不再写 left/top（会触发布局+重绘，飞行期间每帧都在抢主线程）。
+  //        圆点原来靠 left/top 瞬时跟手，没有位移过渡；改成 transform 后要关掉它的 CSS transform 过渡，否则会拖尾。
+  c.style.transition = 'none';
   document.addEventListener('mousemove', function(e){
     pmx = mx; pmy = my;
-    mx = e.clientX; my = e.clientY;
-    // Snap inner dot instantly
-    c.style.left = mx + 'px';
-    c.style.top  = my + 'px';
+    mx = e.clientX; my = e.clientY;      // 只记录，统一在下一帧 tick 里写一次
   }, {passive:true});
 
   // Hover state wired to scale targets
@@ -1039,6 +1039,7 @@ function esc(str) {
   });
   _hoverObs.observe(document.body, {attributes:true, attributeFilter:['class']});
 
+  var _lastRt = '', _lastCt = '';
   (function tick(){
     // Velocity: raw delta between true mouse pos and ring pos (no double-smoothing)
     var dx    = mx - rx;
@@ -1058,10 +1059,10 @@ function esc(str) {
     curScaleC  += (curScale  - curScaleC)  * 0.20;
     ringScaleC += (ringScale - ringScaleC) * 0.20;
 
-    r.style.left      = rx + 'px';
-    r.style.top       = ry + 'px';
-    r.style.transform = 'translate(-50%,-50%) scale(' + ringScaleC.toFixed(3) + ')';
-    c.style.transform = 'translate(-50%,-50%) scale(' + curScaleC.toFixed(3) + ')';
+    var rt = 'translate3d(' + rx.toFixed(2) + 'px,' + ry.toFixed(2) + 'px,0) translate(-50%,-50%) scale(' + ringScaleC.toFixed(3) + ')';
+    var ct = 'translate3d(' + mx + 'px,' + my + 'px,0) translate(-50%,-50%) scale(' + curScaleC.toFixed(3) + ')';
+    if(rt !== _lastRt){ r.style.transform = rt; _lastRt = rt; }     // 没变化就不写，鼠标静止时主线程零开销
+    if(ct !== _lastCt){ c.style.transform = ct; _lastCt = ct; }
 
     requestAnimationFrame(tick);
   })();
@@ -8048,6 +8049,15 @@ function _lbDriveFast(img, t, b, dir, dur){
     cleanup();                                          // 同一任务内：代理移除 + 真图显示 → 同一帧完成交换
     var f = h.onfinish; if(f) f.call(h);
   };
+  /* [perf] 起步预热：代理层刚插入时要做首次绘制 + 大图栅格化/上传纹理，是一次性的主线程重活。
+     动画若同时开始计时，这次卡顿会直接吃掉开头几帧。所以先暂停在第 0 帧（画面与缩略图/灯箱图完全重合，肉眼无差别），
+     等两帧让它绘制完成，再 play —— 重活发生在动画计时之前。 */
+  var all = [aW, aI, aR, aF];
+  all.forEach(function(x){ if(x) x.pause(); });
+  requestAnimationFrame(function(){ requestAnimationFrame(function(){
+    if(h._dead || h.playState !== 'running') return;
+    all.forEach(function(x){ if(x) x.play(); });
+  }); });
   return h;
 }
 function _lbDrive(img, t, b, dir, dur){
