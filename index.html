@@ -7989,9 +7989,14 @@ function _lbDriveFast(img, t, b, dir, dur){
   var w = { left: Math.max(m0.left, 0), right: Math.min(m0.right, window.innerWidth),
             top: Math.max(m0.top, tb0.bottom, 0), bottom: Math.min(m0.bottom, window.innerHeight) };
   var a = _lbThumbRect(t, b);
-  // 可见部分必须有面积；完全在窗口外（零面积）仍交给旧方案处理
-  if(Math.min(a.right, w.right) - Math.max(a.left, w.left) < 2 || Math.min(a.bottom, w.bottom) - Math.max(a.top, w.top) < 2) return null;
   var VW = window.innerWidth, VH = window.innerHeight;
+  function _cl(x, lo, hi){ return Math.max(lo, Math.min(hi, x)); }
+  // 与旧方案 _lbDriveSlow 同一套判定：缩略图完全在窗口内 → 不需要遮挡窗；被 tab 栏/边缘遮住一部分 → 需要
+  var needBox = !(a.left >= w.left - .5 && a.right <= w.right + .5 && a.top >= w.top - .5 && a.bottom <= w.bottom + .5);
+  // 遮挡窗起点 = 缩略图的可见矩形（完整矩形 ∩ 窗口），与旧方案一致
+  var vis = { l: _cl(a.left, w.left, w.right), r: _cl(a.right, w.left, w.right), t: _cl(a.top, w.top, w.bottom), b: _cl(a.bottom, w.top, w.bottom) };
+  // 可见部分没有面积（整个被盖住/滚出）：仍交给旧方案处理
+  if(needBox && (vis.r - vis.l < 2 || vis.b - vis.t < 2)) return null;
 
   var P = _lbPose(t, b, a, meta);
   var F = { tx: 0, ty: 0, s: 1, r: parseFloat(getComputedStyle(img).borderRadius) || 10 };
@@ -8005,7 +8010,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   var hasFilter = Math.abs(FV.b - 1) > .002 || Math.abs(FV.s - 1) > .002 || Math.abs(FV.c - 1) > .002;
 
   var cx0 = b.left + b.width / 2, cy0 = b.top + b.height / 2, BW = b.width, BH = b.height;
-  var N = 24, kfW = [], kfI = [], kfR = [];
+  var N = 24, kfW = [], kfI = [], kfR = [], kfO = [];
   for(var i = 0; i <= N; i++){
     var p = i / N, e = _lbEaseFn(p), u = dir === 'in' ? e : 1 - e;
     var A, B, k;
@@ -8015,20 +8020,26 @@ function _lbDriveFast(img, t, b, dir, dur){
     var rS = _lbLerp(P.cr, F.r, u) * sc;                          // 屏幕上的圆角半径
     var sl = cx0 + tx + sc * (c3 - BW / 2), sr = cx0 + tx + sc * (BW - c1 - BW / 2);
     var st = cy0 + ty + sc * (c0 - BH / 2), sb = cy0 + ty + sc * (BH - c2 - BH / 2);
-    // 遮挡窗：起点 = tab 栏/容器之内的可见区，飞行中平滑展开到整个视口（与旧方案的 box 裁切窗一致，但全程在合成器上）
-    var wl = _lbLerp(w.left, 0, u), wt = _lbLerp(w.top, 0, u), wr = _lbLerp(w.right, VW, u), wb = _lbLerp(w.bottom, VH, u);
-    if(sl < wl) sl = wl; if(st < wt) st = wt; if(sr > wr) sr = wr; if(sb > wb) sb = wb;
-    if(sr < sl + 1) sr = sl + 1; if(sb < st + 1) sb = st + 1;
     var sx = Math.max(sr - sl, 1) / BW, sy = Math.max(sb - st, 1) / BH;
     var ex = (cx0 + tx - sc * BW / 2 - sl) / sx, ey = (cy0 + ty - sc * BH / 2 - st) / sy;
-    kfW.push({ offset: p, transform: 'translate(' + sl.toFixed(2) + 'px,' + st.toFixed(2) + 'px) scale(' + sx.toFixed(5) + ',' + sy.toFixed(5) + ')' });
+    // 遮挡窗（方角，与旧方案的 #lbImgBox 裁切一致）：可见矩形 → 整个视口，与 img 同一个进度 u。
+    // 它是外层 O（屏幕坐标），内层 W 负责「cover 裁切 + 圆角」，所以 tab 栏切线处是直角，不会被圆角吃掉。
+    var ol = 0, ot = 0, osx = 1, osy = 1;
+    if(needBox){
+      ol = _lbLerp(vis.l, 0, u); ot = _lbLerp(vis.t, 0, u);
+      osx = Math.max(_lbLerp(vis.r, VW, u) - ol, 1) / VW; osy = Math.max(_lbLerp(vis.b, VH, u) - ot, 1) / VH;
+      kfO.push({ offset: p, transform: 'translate(' + ol.toFixed(2) + 'px,' + ot.toFixed(2) + 'px) scale(' + osx.toFixed(5) + ',' + osy.toFixed(5) + ')' });
+    }
+    // W 在 O 的局部坐标里：先抵消 O 的平移/缩放，合成后的屏幕位置与不加窗口时完全相同
+    var wx = (sl - ol) / osx, wy = (st - ot) / osy, wsx = sx / osx, wsy = sy / osy;
+    kfW.push({ offset: p, transform: 'translate(' + wx.toFixed(2) + 'px,' + wy.toFixed(2) + 'px) scale(' + wsx.toFixed(5) + ',' + wsy.toFixed(5) + ')' });
     kfI.push({ offset: p, transform: 'translate(' + ex.toFixed(2) + 'px,' + ey.toFixed(2) + 'px) scale(' + (sc / sx).toFixed(5) + ',' + (sc / sy).toFixed(5) + ')' });
     kfR.push({ offset: p, borderRadius: (rS / sx).toFixed(2) + 'px / ' + (rS / sy).toFixed(2) + 'px' });
   }
 
   var W = document.createElement('div');
   W.setAttribute('aria-hidden', 'true'); W.className = 'lb-fly-proxy';
-  W.style.cssText = 'position:fixed;left:0;top:0;width:' + BW + 'px;height:' + BH + 'px;overflow:hidden;transform-origin:0 0;' +
+  W.style.cssText = 'position:' + (needBox ? 'absolute' : 'fixed') + ';left:0;top:0;width:' + BW + 'px;height:' + BH + 'px;overflow:hidden;transform-origin:0 0;' +
                     'pointer-events:none;z-index:3;will-change:transform;transform:' + kfW[0].transform + ';border-radius:' + kfR[0].borderRadius;
   var I = new Image();
   I.alt = ''; I.decoding = 'sync'; I.draggable = false; I.src = src;
@@ -8036,15 +8047,23 @@ function _lbDriveFast(img, t, b, dir, dur){
                     'object-fit:contain;display:block;transform-origin:0 0;will-change:transform;transform:' + kfI[0].transform + ';border-radius:0;box-shadow:none';
   if(!(I.complete && I.naturalWidth)) return null;      // 没命中内存缓存：不冒险，走旧方案
   W.appendChild(I);
+  var O = null, T = W;                                  // T = 挂到 #lb 上的最外层
+  if(needBox){
+    O = document.createElement('div');
+    O.setAttribute('aria-hidden', 'true'); O.className = 'lb-fly-proxy';
+    O.style.cssText = 'position:fixed;left:0;top:0;width:' + VW + 'px;height:' + VH + 'px;overflow:hidden;transform-origin:0 0;' +
+                      'pointer-events:none;z-index:3;will-change:transform;transform:' + kfO[0].transform;
+    O.appendChild(W); T = O;
+  }
 
   // ── 以下开始产生副作用 ──
   var prevTr = img.style.transition;
   img.style.transition = 'none';
   img.style.opacity = '0';                              // 真图先藏起来，飞行完成的同一帧再换回
-  lb.appendChild(W);
+  lb.appendChild(T);
 
   var opt = { duration: dur, easing: 'linear', fill: 'both' };
-  var aW = W.animate(kfW, opt), aI = I.animate(kfI, opt), aR = W.animate(kfR, opt), aF = null;
+  var aW = W.animate(kfW, opt), aI = I.animate(kfI, opt), aR = W.animate(kfR, opt), aF = null, aO = O ? O.animate(kfO, opt) : null;
   if(hasFilter){
     var idle = 'brightness(1) saturate(1) contrast(1)';
     var thumbF = 'brightness(' + FV.b + ') saturate(' + FV.s + ') contrast(' + FV.c + ')';
@@ -8065,8 +8084,8 @@ function _lbDriveFast(img, t, b, dir, dur){
     window.removeEventListener('wheel',     _stopScroll, { capture: true });
     window.removeEventListener('touchmove', _stopScroll, { capture: true });
     window.removeEventListener('keydown',   _stopKey,    { capture: true });
-    [aW, aI, aR, aF].forEach(function(x){ if(x){ x.onfinish = null; try{ x.cancel(); }catch(e){} } });
-    if(W.parentNode) W.parentNode.removeChild(W);
+    [aW, aI, aR, aF, aO].forEach(function(x){ if(x){ x.onfinish = null; try{ x.cancel(); }catch(e){} } });
+    if(T.parentNode) T.parentNode.removeChild(T);
   }
 
   var box = document.getElementById('lbImgBox');
@@ -8095,7 +8114,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   /* [perf] 起步预热：代理层刚插入时要做首次绘制 + 大图栅格化/上传纹理，是一次性的主线程重活。
      动画若同时开始计时，这次卡顿会直接吃掉开头几帧。所以先暂停在第 0 帧（画面与缩略图/灯箱图完全重合，肉眼无差别），
      等两帧让它绘制完成，再 play —— 重活发生在动画计时之前。 */
-  var all = [aW, aI, aR, aF];
+  var all = [aW, aI, aR, aF, aO];
   all.forEach(function(x){ if(x) x.pause(); });
   requestAnimationFrame(function(){ requestAnimationFrame(function(){
     if(h._dead || h.playState !== 'running') return;
