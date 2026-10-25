@@ -761,6 +761,8 @@ body::after {
   animation:lbBreath 2.2s cubic-bezier(.37,0,.63,1) infinite alternate;will-change:transform,opacity;}
 @keyframes lbBreath{from{transform:scale(.88);opacity:.4;}to{transform:scale(1.04);opacity:1;}}
 .lb-side{width:188px;flex-shrink:0;padding-bottom:0;position:absolute;left:calc(100% + 32px);top:78%;transform:translateY(-50%);transition:none;}
+/* 默认透明：JS 只通过内联 opacity 显示它。否则首次打开时计算值是 1，会触发一次 1→0 的 .3s 过渡，卡片底色/边框闪一下 */
+.lb-side{opacity:0;}
 .lb-idx{font-family:'Jost',sans-serif;font-weight:400;font-size:.52rem;letter-spacing:.36em;text-transform:uppercase;color:var(--gold);margin-bottom:14px}
 .lb-title{font-family:'ZCOOL QingKe HuangYou',serif;font-size:1.45rem;color:var(--cream);letter-spacing:.06em;line-height:1.25;margin-bottom:5px}
 .lb-en{font-family:'Jost',sans-serif;font-weight:300;font-size:.55rem;letter-spacing:.22em;text-transform:uppercase;color:var(--fg-d);margin-bottom:8px}
@@ -8312,6 +8314,9 @@ function _lbDriveFast(img, t, b, dir, dur){
   var vis = { l: _cl(a.left, w.left, w.right), r: _cl(a.right, w.left, w.right), t: _cl(a.top, w.top, w.bottom), b: _cl(a.bottom, w.top, w.bottom) };
   // 可见部分没有面积（整个被盖住/滚出）：仍交给旧方案处理
   if(needBox && (vis.r - vis.l < 2 || vis.b - vis.t < 2)) return null;
+  // 只处理上/下边被遮（tab 栏、底部渐隐）的常见情况；左右也被遮的罕见情况交给旧方案
+  var needTop = needBox && a.top < w.top - .5, needBot = needBox && a.bottom > w.bottom + .5;
+  if(needBox && (!(needTop || needBot) || a.left < w.left - .5 || a.right > w.right + .5)) return null;
   var _bxEl = document.getElementById('lbImgBox'), bxr = _bxEl ? _bxEl.getBoundingClientRect() : null;   // 落地交接用
 
   var P = _lbPose(t, b, a, meta);
@@ -8326,7 +8331,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   var hasFilter = Math.abs(FV.b - 1) > .002 || Math.abs(FV.s - 1) > .002 || Math.abs(FV.c - 1) > .002;
 
   var cx0 = b.left + b.width / 2, cy0 = b.top + b.height / 2, BW = b.width, BH = b.height;
-  var N = 24, kfW = [], kfI = [], kfR = [], kfO = [];
+  var N = 24, kfW = [], kfI = [], kfR = [], kfOt = [], kfOb = [];
   for(var i = 0; i <= N; i++){
     var p = i / N, e = _lbEaseFn(p), u = dir === 'in' ? e : 1 - e;
     var A, B, k;
@@ -8338,16 +8343,14 @@ function _lbDriveFast(img, t, b, dir, dur){
     var st = cy0 + ty + sc * (c0 - BH / 2), sb = cy0 + ty + sc * (BH - c2 - BH / 2);
     var sx = Math.max(sr - sl, 1) / BW, sy = Math.max(sb - st, 1) / BH;
     var ex = (cx0 + tx - sc * BW / 2 - sl) / sx, ey = (cy0 + ty - sc * BH / 2 - st) / sy;
-    // 遮挡窗（方角，与旧方案的 #lbImgBox 裁切一致）：可见矩形 → 整个视口，与 img 同一个进度 u。
-    // 它是外层 O（屏幕坐标），内层 W 负责「cover 裁切 + 圆角」，所以 tab 栏切线处是直角，不会被圆角吃掉。
-    var ol = 0, ot = 0, osx = 1, osy = 1;
-    if(needBox){
-      ol = _lbLerp(vis.l, 0, u); ot = _lbLerp(vis.t, 0, u);
-      osx = Math.max(_lbLerp(vis.r, VW, u) - ol, 1) / VW; osy = Math.max(_lbLerp(vis.b, VH, u) - ot, 1) / VH;
-      kfO.push({ offset: p, transform: 'translate(' + ol.toFixed(2) + 'px,' + ot.toFixed(2) + 'px) scale(' + osx.toFixed(5) + ',' + osy.toFixed(5) + ')' });
-    }
-    // W 在 O 的局部坐标里：先抵消 O 的平移/缩放，合成后的屏幕位置与不加窗口时完全相同
-    var wx = (sl - ol) / osx, wy = (st - ot) / osy, wsx = sx / osx, wsy = sy / osy;
+    // 遮挡窗（方角）：上边缘 w.top → 0，下边缘 w.bottom → VH，与 img 同一个进度 u。
+    // 关键：窗口只做【纯平移】——高 = 整个视口的容器上下平移，裁切边缘随之移动；
+    // 里面的 W 用同量反向平移抵消，因此没有任何非等比缩放 / 反向放大几十倍的图层，合成器不必反复栅格化超大图层。
+    var dT = needTop ? _lbLerp(w.top, 0, u) : 0, dB = needBot ? _lbLerp(w.bottom, VH, u) - VH : 0;
+    var par = needTop ? dT : (needBot ? dB : 0);          // 最内层窗口的屏幕偏移
+    if(needBot) kfOb.push({ offset: p, transform: 'translate(0px,' + dB.toFixed(2) + 'px)' });
+    if(needTop) kfOt.push({ offset: p, transform: 'translate(0px,' + (dT - (needBot ? dB : 0)).toFixed(2) + 'px)' });
+    var wx = sl, wy = st - par, wsx = sx, wsy = sy;
     kfW.push({ offset: p, transform: 'translate(' + wx.toFixed(2) + 'px,' + wy.toFixed(2) + 'px) scale(' + wsx.toFixed(5) + ',' + wsy.toFixed(5) + ')' });
     kfI.push({ offset: p, transform: 'translate(' + ex.toFixed(2) + 'px,' + ey.toFixed(2) + 'px) scale(' + (sc / sx).toFixed(5) + ',' + (sc / sy).toFixed(5) + ')' });
     kfR.push({ offset: p, borderRadius: (rS / sx).toFixed(2) + 'px / ' + (rS / sy).toFixed(2) + 'px' });
@@ -8363,14 +8366,16 @@ function _lbDriveFast(img, t, b, dir, dur){
                     'object-fit:contain;display:block;transform-origin:0 0;will-change:transform;transform:' + kfI[0].transform + ';border-radius:0;box-shadow:none';
   if(!(I.complete && I.naturalWidth)) return null;      // 没命中内存缓存：不冒险，走旧方案
   W.appendChild(I);
-  var O = null, T = W;                                  // T = 挂到 #lb 上的最外层
-  if(needBox){
-    O = document.createElement('div');
-    O.setAttribute('aria-hidden', 'true'); O.className = 'lb-fly-proxy';
-    O.style.cssText = 'position:fixed;left:0;top:0;width:' + VW + 'px;height:' + VH + 'px;overflow:hidden;transform-origin:0 0;' +
-                      'pointer-events:none;z-index:3;will-change:transform;transform:' + kfO[0].transform;
-    O.appendChild(W); T = O;
+  var T = W, Ot = null, Ob = null;                      // T = 挂到 #lb 上的最外层
+  function _mkWin(kf, fixed){
+    var e = document.createElement('div');
+    e.setAttribute('aria-hidden', 'true'); e.className = 'lb-fly-proxy';
+    e.style.cssText = 'position:' + (fixed ? 'fixed' : 'absolute') + ';left:0;top:0;width:' + VW + 'px;height:' + VH + 'px;overflow:hidden;transform-origin:0 0;' +
+                      'pointer-events:none;z-index:3;will-change:transform;transform:' + kf[0].transform;
+    return e;
   }
+  if(needTop){ Ot = _mkWin(kfOt, !needBot); Ot.appendChild(W); T = Ot; }
+  if(needBot){ Ob = _mkWin(kfOb, true); Ob.appendChild(T); T = Ob; }
 
   // ── 以下开始产生副作用 ──
   var prevTr = img.style.transition;
@@ -8380,7 +8385,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   lb.appendChild(T);
 
   var opt = { duration: dur, easing: 'linear', fill: 'both' };
-  var aW = W.animate(kfW, opt), aI = I.animate(kfI, opt), aR = W.animate(kfR, opt), aF = null, aO = O ? O.animate(kfO, opt) : null;
+  var aW = W.animate(kfW, opt), aI = I.animate(kfI, opt), aR = W.animate(kfR, opt), aF = null, aOt = Ot ? Ot.animate(kfOt, opt) : null, aOb = Ob ? Ob.animate(kfOb, opt) : null;
   if(hasFilter){
     var idle = 'brightness(1) saturate(1) contrast(1)';
     var thumbF = 'brightness(' + FV.b + ') saturate(' + FV.s + ') contrast(' + FV.c + ')';
@@ -8405,7 +8410,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   function cleanup(){
     if(cleaned) return; cleaned = true;
     unlock();
-    [aW, aI, aR, aF, aO].forEach(function(x){ if(x){ x.onfinish = null; try{ x.cancel(); }catch(e){} } });
+    [aW, aI, aR, aF, aOt, aOb].forEach(function(x){ if(x){ x.onfinish = null; try{ x.cancel(); }catch(e){} } });
     if(T.parentNode) T.parentNode.removeChild(T);
   }
   /* 落地交接：真图先显示，代理层继续盖在上面两帧再撤——真图首次以终态绘制/栅格化时（大图 + clip-path）
@@ -8450,7 +8455,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   /* [perf] 起步预热：代理层刚插入时要做首次绘制 + 大图栅格化/上传纹理，是一次性的主线程重活。
      动画若同时开始计时，这次卡顿会直接吃掉开头几帧。所以先暂停在第 0 帧（画面与缩略图/灯箱图完全重合，肉眼无差别），
      等两帧让它绘制完成，再 play —— 重活发生在动画计时之前。 */
-  var all = [aW, aI, aR, aF, aO];
+  var all = [aW, aI, aR, aF, aOt, aOb];
   all.forEach(function(x){ if(x) x.pause(); });
   h.warming = true;
   var _started = false;
