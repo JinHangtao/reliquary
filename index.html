@@ -636,6 +636,7 @@ body::after {
   box-shadow: 0 8px 28px rgba(0,0,0,.35) !important;
 }
 
+.lb-cap-hold .gi-cap{opacity:0 !important;transform:translateY(5px) !important;transition:opacity .12s ease,transform .12s ease !important;}
 /* ── Panel body scroll fade ── */
 .panel-scroll-fade {
   position:sticky; bottom:0; left:0; right:0; height:64px;
@@ -7793,9 +7794,19 @@ function _lbHideThumb(t){
   window._lbKeepTh = null;
   if(_lbThumb && _lbThumb !== t){ _lbThumb.style.visibility = ''; _lbThumb.style.removeProperty('clip-path'); }
   _lbThumb = t || null;
+  var _hc = t && t.closest ? t.closest('[data-lbidx]') : null;
+  if(_lbHoldCard && _lbHoldCard !== _hc) _lbReleaseCap();
+  if(_hc){ _hc.classList.add('lb-cap-hold'); _lbHoldCard = _hc; }
   if(t) _lbApplyCover(t);
 }
-function _lbRestoreThumb(){
+var _lbHoldCard = null;
+function _lbReleaseCap(){
+  if(!_lbHoldCard) return;
+  var c = _lbHoldCard; _lbHoldCard = null;
+  c.classList.remove('lb-cap-hold');   // 小介绍按统一的 .3s 曲线从 0 淡回其悬停状态，半遮挡与正对屏幕的缩略图完全一致
+}
+function _lbRestoreThumb(keepCap){
+  if(!keepCap) _lbReleaseCap();
   if(_lbThumb){ _lbThumb.style.visibility = ''; _lbThumb.style.removeProperty('clip-path'); _lbThumb = null; }
   _lbThumbPartial = false;
   if(window._healGridImgs){ setTimeout(window._healGridImgs, 0); setTimeout(window._healGridImgs, 400); }
@@ -8355,7 +8366,7 @@ function _lbFlyOut(){
             th.style.setProperty('filter', restF, 'important');
             th.style.willChange = 'opacity';
           }
-          _lbRestoreThumb();                         // visibility 还原（此时仍被飞行图盖住）
+          _lbRestoreThumb(true);                     // visibility 还原（此时仍被飞行图盖住）；小介绍留到落地后再统一淡入
           if(!_partial) try{   // 半遮挡：被遮住那截一直可见，再做 0→1 淡入反而会让它先消失再出现（闪烁）
             tail.thAnim = th.animate([{ opacity: 0 }, { opacity: 1 }], { duration: IN, easing: 'cubic-bezier(.33,0,.2,1)' });
           }catch(e){}
@@ -8375,6 +8386,7 @@ function _lbFlyOut(){
           if(_lbAnimBox){ try{ _lbAnimBox.cancel(); }catch(e){} _lbAnimBox = null; }
           _lbFromTf = '';
           _lbFlyState(false);
+          requestAnimationFrame(function(){ if(!_lbIsOn) _lbReleaseCap(); });   // 飞行图撤掉后的下一帧再放开小介绍，避免与缩略图显现同帧「弹出」
           if(th){                                    // 滤镜交还给 CSS：静止态无变化；仍在 hover 时 .4s 平滑过渡
             // 不在此刻降层：.pi-done 的 will-change:auto 会让缩略图此时「掉出」合成层并重新栅格化，
             // 被 tab 栏磨砂层（backdrop-filter）盖住的那一截会因此重采样、闪一下。留到下次打开灯箱时再还原。
