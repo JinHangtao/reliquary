@@ -366,8 +366,7 @@ body.panel-open #three { transform:translateX(-3.5vw); }
 
 .panel-bg {
   position:absolute; inset:0;
-  background:rgba(4,3,2,.55);
-  backdrop-filter:blur(2px) saturate(.6);
+  background:rgba(4,3,2,.62);   /* [perf] 去掉全屏 backdrop-filter：它要对实时 WebGL 画布逐帧重采样 */
   opacity:0; transition:opacity .52s cubic-bezier(.4,0,.2,1);
 }
 #panel.on .panel-bg { opacity:1; }
@@ -399,9 +398,7 @@ body.panel-open #three { transform:translateX(-3.5vw); }
 .panel-head {
   position:sticky; top:0; z-index:2;
   padding:40px 44px 0;
-  background:rgba(14,13,12,.84);
-  backdrop-filter:blur(28px);
-  -webkit-backdrop-filter:blur(28px);
+  background:rgba(14,13,12,.97);   /* [perf] 去掉 blur(28px)：粘性标题栏滑过实时画布时每帧重算模糊 */
   transition:padding .4s cubic-bezier(.4,0,.2,1);
 }
 .panel-head.scrolled { padding:18px 44px 0; }
@@ -2790,9 +2787,20 @@ window._sceneState = {
   // Trade-off: frame time ~44% higher than 1.25 on fill-rate limited GPUs.
   var ssaa = isMobile ? 1.0 : 1.5;
   var dpr  = Math.min(devicePixelRatio, 2);
+  // [perf] 像素预算：原来 retina(dpr=2)×ssaa1.5 = 3 倍像素比，1440x900 屏要渲染约 1260 万像素，
+  // 且后处理(bloom 7 pass)全是按这个尺寸跑，是点击聚焦时掉帧的根本原因。
+  // retina 屏本身每个物理像素就有 4 个采样，不需要再 SSAA；这里按总像素数封顶。
+  var _PX_BUDGET = isMobile ? 2.4e6 : 5.2e6;
+  window._prScale = 1;               // 运行时自适应降档系数（见 _governor）
+  function _pxRatio(){
+    var base = Math.min(dpr * ssaa, isMobile ? 1.75 : 2.25);
+    var area = Math.max(1, window.innerWidth * 1.08 * window.innerHeight);   // 画布比视口宽 8%
+    var r = Math.max(1.0, Math.min(base, Math.sqrt(_PX_BUDGET / area)));
+    return Math.max(0.7, r * window._prScale);
+  }
   var renderer = new THREE.WebGLRenderer({ canvas:canvas, antialias:false, alpha:true,
     powerPreference: isMobile ? 'low-power' : 'high-performance' });
-  renderer.setPixelRatio(dpr * ssaa);
+  renderer.setPixelRatio(_pxRatio());
   renderer.setSize(CW, H, false); // false = don't overwrite CSS size
   canvas.style.width  = CW + 'px';
   canvas.style.height = H + 'px';
@@ -3465,7 +3473,7 @@ window._sceneState = {
       }
       // Mobile: touchend (no 300ms delay) + desktop: click
       var _cornerHandler = (function(cr, sec){ return function(){
-        if(focusE > 0.02) return;   // 镜头聚焦/回位途中不重复触发
+        if(focusE > 0.02 || _panelOpening) return;   // 镜头聚焦/回位途中不重复触发
         // Use crystal's actual 3D→screen projection — label is in corner, crystal is center-screen
         var sp = crystalScreenPos(cr);
         if(window.burstCrystal) window.burstCrystal(sp.x, sp.y);
@@ -3482,7 +3490,7 @@ window._sceneState = {
         _gp.push({ x: sp.x, y: sp.y, alpha: 0.22 });
         if(navigator.vibrate) navigator.vibrate([18, 0, 8]);
         setCamFocus(cr);
-        openPanel(sec);
+        _openPanelNextFrame(sec);
       }; })(cr, cr.section);
       el.addEventListener('click', _cornerHandler);
       // touchend fires immediately (no 300ms ghost-click delay on mobile)
@@ -3596,7 +3604,7 @@ window._sceneState = {
       });
 
       setCamFocus(crystals[hoveredIdx]);
-      openPanel(crystals[hoveredIdx].section);
+      _openPanelNextFrame(crystals[hoveredIdx].section);
     }
   });
 
@@ -3892,7 +3900,7 @@ window._sceneState = {
         // ── Haptic: short crisp pulse matching crystal click feel ──
         if(navigator.vibrate) navigator.vibrate([18, 0, 8]);
         setCamFocus(hitCr);
-        openPanel(hitCr.section);
+        _openPanelNextFrame(hitCr.section);
       }
 
       mouse.set(-9, -9);
@@ -3908,6 +3916,14 @@ window._sceneState = {
   var panelClose= document.getElementById('panelClose');
   var panelOpen = false;
   var panelSlowT = 1.0;
+  // [perf] 点击当帧只做爆裂/冲击波/镜头起步；整块 innerHTML + 绑定放到下一帧，
+  // 避免“点击 + 构建面板 DOM + 面板过渡 + 镜头起步”叠在同一帧造成起步卡顿
+  var _panelOpening = false;
+  function _openPanelNextFrame(sec){
+    if(_panelOpening) return;
+    _panelOpening = true;
+    requestAnimationFrame(function(){ _panelOpening = false; openPanel(sec); });
+  }
   var _hintDismissed = false;
 
   // ── panelClose press-scale — registered ONCE, never inside openPanel ──
@@ -4019,12 +4035,38 @@ window._sceneState = {
   // ── Defer grid thumbnails until the focus camera has settled ──
   // Large scans decoding/uploading during the camera move cause the dropped frames.
   var _gridLoadId = 0, _gridIO = null;
+  // 可选：生成缩略图后把 THUMB_DIR 设成 'images/thumb/'（文件名同名、扩展名 .webp），网格就只加载小图，
+  // 灯箱仍用 data-lbsrc 的原图。缩略图不存在时自动回退原图。默认关闭。
+  var THUMB_DIR = null;
+  function _thumbSrc(s){
+    if(!THUMB_DIR) return s;
+    return THUMB_DIR + s.replace(/^.*\//, '').replace(/\.[a-z]+$/i, '') + '.webp';
+  }
+  // 逐张错峰：前一张解码完(或超时)再放下一张，避免多张几千像素大图同时解码+上传 GPU
+  var _gridQ = [], _gridPump = 0;
+  function _pumpGrid(){
+    _gridPump = 0;
+    var im = _gridQ.shift();
+    if(!im) return;
+    var s = im.getAttribute('data-src');
+    var next = function(){ if(_gridQ.length && !_gridPump) _gridPump = setTimeout(_pumpGrid, isMobile ? 90 : 50); };
+    if(!s){ next(); return; }
+    im.removeAttribute('data-src');
+    var ts = _thumbSrc(s);
+    if(ts !== s){ im.onerror = function(){ im.onerror = null; im.src = s; }; }
+    im.src = ts;
+    var done = false, fin = function(){ if(done) return; done = true; next(); };
+    if(im.decode){ im.decode().then(fin, fin); } 
+    setTimeout(fin, 450);
+  }
+  function _enqueueGrid(im){ _gridQ.push(im); if(!_gridPump) _gridPump = setTimeout(_pumpGrid, 0); }
   function _deferGridImages(root){
+    _gridQ.length = 0;
     var imgs = Array.prototype.slice.call(root.querySelectorAll('img[data-src]'));
     if(_gridIO){ _gridIO.disconnect(); _gridIO = null; }
     if(!imgs.length) return;
     var id = ++_gridLoadId, t0 = Date.now();
-    function load(im){ var s = im.getAttribute('data-src'); if(s){ im.removeAttribute('data-src'); im.src = s; } }
+    function load(im){ if(im.getAttribute('data-src')) _enqueueGrid(im); }
     function start(){
       if(id !== _gridLoadId) return;
       if(typeof focusGoal !== 'undefined' && focusGoal && focusE < 0.985 && Date.now() - t0 < 1600){
@@ -4054,6 +4096,7 @@ window._sceneState = {
   // (e.g. IntersectionObserver or decode() or the load event never completed). Every 700ms while the panel is
   // open, and right after the lightbox flies back, make each grid thumbnail reach a final visible state.
   window._healGridImgs = function(){
+    if(!panelOpen || (focusGoal && focusE < 0.985) || window._lbFlying) return;   // [perf] 镜头运动中不测量布局
     var imgs = document.querySelectorAll('#panelInner [data-lbidx] img');
     if(!imgs.length) return;
     var vh = window.innerHeight || 800;
@@ -4798,6 +4841,7 @@ window._sceneState = {
 
   function closePanel(){
     _gridLoadId++; if(_gridIO){ _gridIO.disconnect(); _gridIO = null; }
+    _gridQ.length = 0;
     if(Date.now() - _panelOpenedAt < 350) return;
     // 灯箱开着（或刚被同一次 Esc 关掉）时，只关灯箱，不连带关面板
     if(document.getElementById('lb').classList.contains('on') || Date.now() - (window._lbClosedAt || 0) < 120) return;
@@ -5959,6 +6003,17 @@ function _zoomWobble(dt, vD, D){
   var _ff=new THREE.Vector3(),  _rt=new THREE.Vector3(), _fUp=new THREE.Vector3(0,1,0);
   var _fq=new THREE.Quaternion(), _fLoc=new THREE.Vector3();
   var _cu=new THREE.Vector3(), _panelInnerEl=null;
+  // [perf] offsetHeight/offsetWidth 会强制同步布局，原来在 animate 里每帧都读；面板尺寸固定，缓存 400ms 即可
+  var _pinC = {h:0, w:0, t:-1e9};
+  function _pinDims(){
+    var n = performance.now();
+    if(n - _pinC.t > 400){
+      var p = _panelInnerEl || (_panelInnerEl = document.querySelector('.panel-inner'));
+      if(p){ _pinC.h = p.offsetHeight; _pinC.w = p.offsetWidth; }
+      _pinC.t = n;
+    }
+    return _pinC;
+  }
   function setCamFocus(cr){
     if(!cr){ focusGoal = 0; return; }
     if(window._lensRefocusNow) window._lensRefocusNow();   // 点击瞬间若正处于“镜头呼吸”模糊中：快速对焦，避免与聚焦镜头叠加
@@ -6118,8 +6173,8 @@ resetIdleTimer();
 
   // Mobile gets half-res FBOs for performance
   var _bloomDiv = isMobile ? 3 : 2;
-  var _bloomW = Math.floor(W * dpr * ssaa);
-  var _bloomH = Math.floor(H * dpr * ssaa);
+  var _bloomW = Math.floor(W * _pxRatio());
+  var _bloomH = Math.floor(H * _pxRatio());
 
   var _makeRT = function(w, h){
     return new THREE.WebGLRenderTarget(Math.floor(w), Math.floor(h), {
@@ -6485,9 +6540,9 @@ resetIdleTimer();
   var _quadScene    = _mkPassScene(_matComposite);
 
   // ── Resize: sync all FBO sizes + resolution uniforms ──
-  window.addEventListener('resize', function(){
-    _bloomW = Math.floor(window.innerWidth  * dpr * ssaa);
-    _bloomH = Math.floor(window.innerHeight * dpr * ssaa);
+  function _applyFboSize(){
+    _bloomW = Math.floor(window.innerWidth  * _pxRatio());
+    _bloomH = Math.floor(window.innerHeight * _pxRatio());
     fboScene.setSize(_bloomW, _bloomH);
     fboExtract.setSize(Math.floor(_bloomW/_bloomDiv),     Math.floor(_bloomH/_bloomDiv));
     fboDown.setSize(  Math.floor(_bloomW/(_bloomDiv*2)),  Math.floor(_bloomH/(_bloomDiv*2)));
@@ -6501,7 +6556,14 @@ resetIdleTimer();
     _matUp.uniforms.uResolution.value.set(   Math.floor(_bloomW/_bloomDiv),      Math.floor(_bloomH/_bloomDiv));
     // FXAA needs full-res scene size for texel offset calculation
     _matComposite.uniforms.uSceneSize.value.set(_bloomW, _bloomH);
-  });
+  }
+  window.addEventListener('resize', _applyFboSize);
+  // 运行时降档：改 _prScale 后同步 renderer + 全部 FBO（只在帧开头调用，不会闪黑帧）
+  window._applyPxRatio = function(){
+    renderer.setPixelRatio(_pxRatio());
+    renderer.setSize(CW, H, false);
+    _applyFboSize();
+  };
 
   // Pre-clear all FBOs — GPU memory is uninitialised, shows as grid on first frame
   [fboScene, fboExtract, fboDown, fboDown2, fboUp2, fboUp].forEach(function(rt){
@@ -6553,6 +6615,7 @@ resetIdleTimer();
   var _lblUp     = new THREE.Vector3();
   var REPEL_RADIUS = 15, REPEL_FORCE = 1200, DAMPING = 0.945, RETURN_FORCE = 0.0008;
   var _conAlpha  = 0;
+  var _conCleared = false;
 
   // ── 运动驱动色差：状态（只分配一次，循环内零分配）──
   // 速度 = (本帧转角 + 0.6×本帧平移/默认机位距离 520) / dt，单位约为 rad/s。
@@ -6567,9 +6630,27 @@ resetIdleTimer();
   var _caPrevP = new THREE.Vector3();
   var _caReduce = (window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches) ? 0.3 : 1.0;
 
+  // ── [perf] 运行时帧率调节器：90 帧平均 >25ms(<40fps) 就把渲染分辨率降 15%，最多两档 ──
+  var _gvN = 0, _gvAcc = 0, _gvLast = 0, _gvCool = 60, _gvSteps = 0;
+  function _governor(){
+    var now = performance.now(), d = now - _gvLast; _gvLast = now;
+    if(d <= 0 || d > 120 || document.hidden) return;        // 忽略切标签页/长卡顿造成的异常间隔
+    if(_gvCool > 0){ _gvCool--; return; }
+    _gvAcc += d; _gvN++;
+    if(_gvN >= 90){
+      var avg = _gvAcc / _gvN; _gvAcc = 0; _gvN = 0;
+      if(avg > 25 && _gvSteps < 2){
+        _gvSteps++; window._prScale *= 0.85; _gvCool = 60;
+        window._applyPxRatio();
+      }
+    }
+  }
+  var _dtSm = 1/60;   // 镜头弹簧用的“抗尖峰” dt
+
   function animate(){
     requestAnimationFrame(animate);
-    if(window._lbOpen || window._lbFlying){ clock.getDelta(); return; }   // 灯箱完全打开后场景被遮住：不渲染（保持 clock 同步，恢复时无时间跳变）
+    if(window._lbOpen || window._lbFlying){ clock.getDelta(); return; }
+    _governor();   // 灯箱完全打开后场景被遮住：不渲染（保持 clock 同步，恢复时无时间跳变）
     // getDelta() returns time since last call; cap at 80ms so a long hidden period
     // (screen lock, tab switch) only advances t by at most ~5 frames — no phase jump.
     var _dt = Math.min(clock.getDelta(), 0.08);
@@ -6587,7 +6668,11 @@ resetIdleTimer();
     var _fo = _fg ? 4.0 : 4.8;                       // 进入稍慢、退出稍快
     // 掉帧保护：单帧卡顿(dt 很大)时镜头不再“瞬移”一大截，最多按 30fps 的步长推进；
     // 正常帧(dt<=33ms)完全等价于原实现，不改变任何正常帧的观感
-    var _fdt = Math.min(_dt, 1/30);
+    // [perf] 抗尖峰：单帧 dt 超过近期均值 2.2 倍时按均值推进，镜头不再因一次卡顿而“瞬移/顿挫”；
+    // 正常帧率抖动(<2.2×)不受影响，和显示器真实时间一致
+    var _dtc = Math.min(_dt, _dtSm * 2.2 + 0.002);
+    _dtSm += (_dtc - _dtSm) * 0.1;
+    var _fdt = Math.min(_dtc, 1/30);
     focusVel += (-_fo*_fo*(focusW - _fg) - 2*_fo*focusVel) * _fdt;
     focusW   += focusVel * _fdt;
     if(focusW < 0){ focusW = 0; focusVel = 0; }
@@ -6667,8 +6752,8 @@ resetIdleTimer();
       var _vis  = 0;                                  // 触屏：面板之外真正可见的区域尺寸(px)
       if(isTouchDev){
         var _pin = _panelInnerEl || (_panelInnerEl = document.querySelector('.panel-inner'));
-        if(isMobile) _vis = Math.max(48, H - (_pin ? _pin.offsetHeight : H*0.91));        // 底部抽屉：只剩顶部一条
-        else         _vis = Math.max(120, W - (_pin ? _pin.offsetWidth  : W*0.72));       // 平板侧栏：只剩左边一列
+        if(isMobile) _vis = Math.max(48, H - (_pinDims().h || H*0.91));        // 底部抽屉：只剩顶部一条
+        else         _vis = Math.max(120, W - (_pinDims().w || W*0.72));       // 平板侧栏：只剩左边一列
         // 推近后石头不能比可见区域还大：按石头在屏幕上的直径限制推近量
         var _d0 = focusCr.scale * 2 * (H / 540);
         var _kMin = Math.min(1, _d0 / (_vis * 0.8));
@@ -7241,7 +7326,8 @@ if(idleDriftSpeed > 0.000005){
   camTy = Math.cos(idleDriftAngle * 0.61) * 4;
 }
     // ── Constellation lines ──
-    if(_constellationReady){
+    if(_constellationReady && focusE < 0.985){
+      _conCleared = false;
       conCtx.clearRect(0, 0, W, H);
       for(var _ci2=0;_ci2<crystals.length;_ci2++){
         crystals[_ci2].group.getWorldPosition(_pos3);
@@ -7252,7 +7338,7 @@ if(idleDriftSpeed > 0.000005){
       }
       // Fade lines in over ~60 frames after activation — no pop-in
       _conAlpha = Math.min(1, _conAlpha + 0.016);
-      var LINE_MAX_DIST=420, LINE_MIN_DIST=60, LINE_MAX_ALPHA=0.055 * _conAlpha;
+      var LINE_MAX_DIST=420, LINE_MIN_DIST=60, LINE_MAX_ALPHA=0.055 * _conAlpha * (1 - focusE);
       conCtx.lineWidth=0.5;
       for(var a=0;a<scrPts.length;a++){
         for(var b=a+1;b<scrPts.length;b++){
@@ -7289,6 +7375,8 @@ if(idleDriftSpeed > 0.000005){
         }
       }
     }
+
+    else if(_constellationReady && !_conCleared){ conCtx.clearRect(0, 0, W, H); _conCleared = true; }
 
     // ── Write caustic projection data for star canvas ──
     if(_causticReady && window._perfTier !== 'low'){
@@ -7628,7 +7716,7 @@ if(idleDriftSpeed > 0.000005){
     W=window.innerWidth; H=window.innerHeight;
     CANVAS_OVERHANG = Math.round(W * 0.08);
     CW = W + CANVAS_OVERHANG;
-    renderer.setPixelRatio(dpr * ssaa);
+    renderer.setPixelRatio(_pxRatio());
     renderer.setSize(CW, H, false);
     canvas.style.width  = CW + 'px';
     canvas.style.height = H + 'px';
