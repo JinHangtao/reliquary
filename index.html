@@ -734,6 +734,7 @@ body::after {
   opacity:0;will-change:opacity;
   transition:opacity .3s cubic-bezier(.4,0,.2,1);}
 .lb.on .lb-bg{opacity:1;}
+.lb:not(.on) .lb-side{-webkit-backdrop-filter:none!important;backdrop-filter:none!important;}
 .lb-wrap{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;gap:0;justify-content:center;margin-top:4vh;}
 .lb-img{flex-shrink:0;position:relative;line-height:0;}
 .lb-img{touch-action:none;}
@@ -7982,7 +7983,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   }
 
   var W = document.createElement('div');
-  W.setAttribute('aria-hidden', 'true');
+  W.setAttribute('aria-hidden', 'true'); W.className = 'lb-fly-proxy';
   W.style.cssText = 'position:fixed;left:0;top:0;width:' + BW + 'px;height:' + BH + 'px;overflow:hidden;transform-origin:0 0;' +
                     'pointer-events:none;z-index:3;will-change:transform;transform:' + kfW[0].transform + ';border-radius:' + kfR[0].borderRadius;
   var I = new Image();
@@ -8420,7 +8421,8 @@ function closeLb(){
   _lbCloseTmr = setTimeout(function(){
     _lbCloseTmr = null;
     if(_lbIsOn) return;             // 期间又打开了，绝不能把新图清掉
-    document.getElementById('lb').style.visibility = '';
+    document.getElementById('lb').style.visibility = 'hidden';   // 立即隐藏：.lb 的 visibility 过渡有 .78s 延迟，期间重置后的空卡片会露出来
+    Array.prototype.forEach.call(document.querySelectorAll('.lb-fly-proxy'), function(n){ if(n.parentNode) n.parentNode.removeChild(n); });
     var img    = document.getElementById('lbImg');
     var imgBox = document.getElementById('lbImgBox');
     var colEl  = document.querySelector('.lb-col');
@@ -8435,7 +8437,7 @@ function closeLb(){
     if(imgBox) { imgBox.style.width=''; imgBox.style.clipPath=''; }
     if(colEl)  { colEl.style.width=''; }
     if(wrapEl) { wrapEl.style.transition=''; wrapEl.style.transform=''; wrapEl.style.opacity=''; }
-    if(sideEl) { sideEl.style.opacity=''; sideEl.style.position=''; sideEl.style.transform=''; sideEl.style.left=''; sideEl.style.top=''; sideEl.style.width=''; sideEl.style.marginTop=''; }
+    if(sideEl) { sideEl.style.opacity='0'; sideEl.style.position=''; sideEl.style.transform=''; sideEl.style.left=''; sideEl.style.top=''; sideEl.style.width=''; sideEl.style.marginTop=''; }
     if(btns) btns.style.opacity = '0';
   }, _resetDelay);
 }
