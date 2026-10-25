@@ -727,10 +727,6 @@ body::after {
   .audio-bar { height:12px !important; margin-top:-4px; margin-bottom:-4px; }
   .audio-progress { height:3px; margin-top:4px; }
 }
-/* 灯箱飞入 / 飞回（含落地交接）期间：缩略图不响应 hover，介绍文字 / 高光保持隐藏，结束后再正常渐显 */
-body.lb-landing #panelBody [data-lbidx]{pointer-events:none !important;}
-body.lb-landing #panelBody .gi-cap,
-body.lb-landing #panelBody .gi-shine{opacity:0 !important;transition:none !important;}
 /* ══ LIGHTBOX ══ */
 /* 灯箱容器本身不整体淡入淡出（否则飞行中的图片会半透明）；只淡背景，图片由 FLIP 飞行接管。
    visibility 延迟隐藏，等飞回动画播完。 */
@@ -7687,7 +7683,6 @@ var _lbTok   = 0;      // 防竞态 token
 var _lbFromTf = '';
 function _lbFlyState(on){
   window._lbFlying = !!on;
-  document.body.classList.toggle('lb-landing', !!on);
   var e = document.getElementById('lb'); if(e) e.classList.toggle('lb-flying', !!on);
 }    // 飞回的起点 transform（灯箱里放大 / 平移过时 = 当时的内联 transform，否则空）
 var _LB_EASE = 'cubic-bezier(.32,.72,0,1)';
@@ -7711,8 +7706,16 @@ var _lbWinCache = null, _lbBoxCache = null;   // 飞行期间缓存：窗口/外
 // 底部渐隐遮罩 (#panelScrollFade, z-index:3) 同样会盖住缩略图——飞行图在它之上，
 // 若不把它从窗口里扣掉，飞行图会以「未变暗」的亮度落地，再切到被遮罩压暗的缩略图 → 闪一下。
 function _lbCalcWindow(){
-  // 放开限制：不再避让 tab 栏 / 底部渐隐遮罩，飞行图永远按缩略图完整矩形飞，只受视口边缘限制
-  return { left: 0, right: window.innerWidth, top: 0, bottom: window.innerHeight };
+  var m  = document.getElementById('panelInner').getBoundingClientRect();
+  var tb = document.querySelector('.panel-head').getBoundingClientRect();
+  var top = Math.max(m.top, tb.bottom, 0);
+  var bottom = Math.min(m.bottom, window.innerHeight);
+  var fd = document.getElementById('panelScrollFade');
+  if(fd){
+    var fr = fd.getBoundingClientRect();
+    if(fr.height > 0 && fr.top > top && fr.top < bottom && parseFloat(getComputedStyle(fd).opacity) > 0.05) bottom = fr.top;
+  }
+  return { left: Math.max(m.left, 0), right: Math.min(m.right, window.innerWidth), top: top, bottom: bottom };
 }
 function _lbWindow(){
   if(_lbWinCache) return _lbWinCache;
@@ -7778,8 +7781,12 @@ function _lbCoverClip(t){
 function _lbApplyCover(t){
   _lbThumbPartial = false;
   if(!t) return;
-  t.style.visibility = 'hidden';
-  t.style.removeProperty('clip-path');
+  var c = null;
+  try{ c = _lbCoverClip(t); }catch(e){ c = null; }
+  if(c === null){ t.style.visibility = 'hidden'; t.style.removeProperty('clip-path'); return; }
+  t.style.visibility = '';
+  if(c) t.style.setProperty('clip-path', c, 'important'); else t.style.removeProperty('clip-path');
+  _lbThumbPartial = true;
 }
 function _lbHideThumb(t){
   if(window._lbKeepTh && window._lbKeepTh !== t){ window._lbKeepTh.style.willChange = ''; }
