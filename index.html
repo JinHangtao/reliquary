@@ -7703,16 +7703,23 @@ function _lbThumbOf(idx){
 
 // 缩略图能被看到的窗口：滚动容器可视区 去掉 sticky tab 栏，再与视口求交
 var _lbWinCache = null, _lbBoxCache = null;   // 飞行期间缓存：窗口/外层盒子不会动，没必要每帧重读
-function _lbWindow(){
-  if(_lbWinCache) return _lbWinCache;
+// 底部渐隐遮罩 (#panelScrollFade, z-index:3) 同样会盖住缩略图——飞行图在它之上，
+// 若不把它从窗口里扣掉，飞行图会以「未变暗」的亮度落地，再切到被遮罩压暗的缩略图 → 闪一下。
+function _lbCalcWindow(){
   var m  = document.getElementById('panelInner').getBoundingClientRect();
   var tb = document.querySelector('.panel-head').getBoundingClientRect();
-  return {
-    left:   Math.max(m.left, 0),
-    right:  Math.min(m.right, window.innerWidth),
-    top:    Math.max(m.top, tb.bottom, 0),
-    bottom: Math.min(m.bottom, window.innerHeight)
-  };
+  var top = Math.max(m.top, tb.bottom, 0);
+  var bottom = Math.min(m.bottom, window.innerHeight);
+  var fd = document.getElementById('panelScrollFade');
+  if(fd){
+    var fr = fd.getBoundingClientRect();
+    if(fr.height > 0 && fr.top > top && fr.top < bottom && parseFloat(getComputedStyle(fd).opacity) > 0.05) bottom = fr.top;
+  }
+  return { left: Math.max(m.left, 0), right: Math.min(m.right, window.innerWidth), top: top, bottom: bottom };
+}
+function _lbWindow(){
+  if(_lbWinCache) return _lbWinCache;
+  return _lbCalcWindow();
 }
 // 缩略图的「有效矩形」：无论缩略图在哪、甚至不存在，都返回一个可以飞的矩形，保证每次点击都有 FLIP。
 //  · 在窗口里（含只露一半）：就是它的真实矩形（完整矩形，被遮住的部分交给裁切窗）
@@ -7957,11 +7964,7 @@ function _lbDriveSlow(img, t, b, dir, dur){
   var box  = document.getElementById('lbImgBox');
   var meta = _lbThumbMeta(t);                              // 静态样式只读一次
   // 飞行期间不变的矩形：只量一次
-  var m0 = document.getElementById('panelInner').getBoundingClientRect(), tb0 = document.querySelector('.panel-head').getBoundingClientRect();
-  _lbWinCache = {
-    left: Math.max(m0.left, 0), right: Math.min(m0.right, window.innerWidth),
-    top: Math.max(m0.top, tb0.bottom, 0), bottom: Math.min(m0.bottom, window.innerHeight)
-  };
+  _lbWinCache = _lbCalcWindow();
   var w  = _lbWinCache;
   var bx = box.getBoundingClientRect();
   _lbBoxCache = bx;
@@ -8121,9 +8124,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   if(!lb || !src || src.indexOf('about:blank') === 0) return null;
 
   var meta = _lbThumbMeta(t);
-  var m0 = document.getElementById('panelInner').getBoundingClientRect(), tb0 = document.querySelector('.panel-head').getBoundingClientRect();
-  var w = { left: Math.max(m0.left, 0), right: Math.min(m0.right, window.innerWidth),
-            top: Math.max(m0.top, tb0.bottom, 0), bottom: Math.min(m0.bottom, window.innerHeight) };
+  var w = _lbCalcWindow();
   var a = _lbThumbRect(t, b);
   var VW = window.innerWidth, VH = window.innerHeight;
   function _cl(x, lo, hi){ return Math.max(lo, Math.min(hi, x)); }
