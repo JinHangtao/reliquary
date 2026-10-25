@@ -8410,14 +8410,36 @@ function _lbFlyOut(){
           window.removeEventListener('scroll',    _onScr, { capture: true });
           window.removeEventListener('keydown',   _onScr, { capture: true });
         };
+        /* ── 对齐：半遮挡缩略图与正中缩略图走【同一条时间线】──
+           以前半遮挡的收尾 0ms 就开始、两帧后硬切撤掉飞行图（此时黑底 / 文字栏还没淡完，
+           又恰好与「放开小介绍」同一时刻），所以「底下文字介绍 + 黑底 + 图片落地」会一起微闪一下。
+           现在：两者都先等 IN-OVERLAP（黑底与文字栏淡完），再交接，放开小介绍的时刻也一致。
+           · 桌面端：半遮挡也用与正中完全相同的「飞行图交叉淡出」（缩略图已在下方完整显示，
+             遮挡窗仍在，所以不会穿到 tab 栏前面）。
+           · 手机端：保持原子交接（避免手机 GPU 对带滤镜+裁切的图层做 opacity 动画），
+             但同样延后到黑底淡完之后，不再与黑底的毛玻璃淡出同帧换层。 */
+        var _narrow = window.innerWidth <= 768;
         tail.timer = setTimeout(function(){
           tail.timer = 0;
           if(_lbTail !== tail) return;               // 期间被取消（又打开了灯箱）
-          if(_partial){
-            /* 半遮挡：飞行图带着 clip-path + 外层遮挡窗 + filter，再对它做 opacity 动画会让手机 GPU
-               反复重建离屏渲染面，滤镜结果跳变 = 闪一下。改为「原子交接」：缩略图此刻已完整显示在下方，
-               等两帧让它先绘制完成，再一次性撤掉飞行图，全程没有任何透明度渐变。 */
-            requestAnimationFrame(function(){ requestAnimationFrame(_finish); });
+          if(_partial && _narrow){
+            tail.timer = setTimeout(function(){
+              tail.timer = 0;
+              if(_lbTail !== tail) return;
+              requestAnimationFrame(function(){ requestAnimationFrame(_finish); });
+            }, OUT - 50);                            // 总时长仍落在 _lbFlyOut 返回的 650ms 之内
+            return;
+          }
+          if(_partial){                              // 桌面端半遮挡：先让下方缩略图稳定绘制两帧，再开始交叉淡出
+            requestAnimationFrame(function(){ requestAnimationFrame(function(){
+              if(_lbTail !== tail) return;
+              try{
+                fadeAnim = img.animate([{ opacity: 1 }, { opacity: 0 }],
+                                       { duration: OUT - 30, easing: 'cubic-bezier(.4,0,.6,1)', fill: 'forwards' });
+                tail.fade = fadeAnim;
+                fadeAnim.onfinish = function(){ _finish(); };
+              }catch(e){ _finish(); }
+            }); });
             return;
           }
           try{
@@ -8426,7 +8448,7 @@ function _lbFlyOut(){
             tail.fade = fadeAnim;
             fadeAnim.onfinish = function(){ _finish(); };
           }catch(e){ _finish(); }
-        }, _partial ? 0 : Math.max(0, IN - OVERLAP));
+        }, Math.max(0, IN - OVERLAP));
       };
       return 300 + (180 - 60) + 170 + 60;   // 飞行 300 + 缩略图淡入先行 120 + 飞行图淡出 170 + 余量
     }
