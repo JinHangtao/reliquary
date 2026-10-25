@@ -736,9 +736,9 @@ body::after {
 @media (pointer:coarse) and (max-width:768px){ .lb{ cursor:pointer; } }
 @media (pointer:coarse) and (min-width:769px){ .lb{ cursor:auto; } }
 .lb.on{visibility:visible;pointer-events:all;transition-delay:0s}
-.lb.on .lb-img img{visibility:visible;will-change:transform,clip-path;}
+.lb.on .lb-img img{visibility:visible;will-change:transform,clip-path;backface-visibility:hidden;}
 .lb.lb-flying .lb-img img{box-shadow:none !important;will-change:transform,clip-path;backface-visibility:hidden;}
-.lb.lb-flying .lb-img{will-change:clip-path;}
+.lb.on .lb-img,.lb.lb-flying .lb-img{will-change:clip-path;}
 .lb.lb-flying .lb-side{-webkit-backdrop-filter:none!important;backdrop-filter:none!important;}
 .lb-bg{position:absolute;inset:0;background:rgba(4,3,3,.97);
   /* [perf] 原 backdrop-filter:blur(24px) 已移除：底色 .97 不透明，模糊几乎不可见，
@@ -8208,7 +8208,8 @@ function _lbDriveFast(img, t, b, dir, dur){
   // ── 以下开始产生副作用 ──
   var prevTr = img.style.transition;
   img.style.transition = 'none';
-  img.style.opacity = '0';                              // 真图先藏起来，飞行完成的同一帧再换回
+  if(dir === 'in') img.style.opacity = '0';             // 飞入：真图本来就该藏着
+  else if(_lbFromTf) img.style.transform = _lbFromTf;   // 飞回：预热期真图保持可见，且姿态与代理层一致
   lb.appendChild(T);
 
   var opt = { duration: dur, easing: 'linear', fill: 'both' };
@@ -8227,14 +8228,25 @@ function _lbDriveFast(img, t, b, dir, dur){
   window.addEventListener('wheel',     _stopScroll, { passive: false, capture: true });
   window.addEventListener('touchmove', _stopScroll, { passive: false, capture: true });
   window.addEventListener('keydown',   _stopKey,    { passive: false, capture: true });
-  var cleaned = false;
-  function cleanup(){
-    if(cleaned) return; cleaned = true;
+  var cleaned = false, unlocked = false;
+  function unlock(){
+    if(unlocked) return; unlocked = true;
     window.removeEventListener('wheel',     _stopScroll, { capture: true });
     window.removeEventListener('touchmove', _stopScroll, { capture: true });
     window.removeEventListener('keydown',   _stopKey,    { capture: true });
+  }
+  function cleanup(){
+    if(cleaned) return; cleaned = true;
+    unlock();
     [aW, aI, aR, aF, aO].forEach(function(x){ if(x){ x.onfinish = null; try{ x.cancel(); }catch(e){} } });
     if(T.parentNode) T.parentNode.removeChild(T);
+  }
+  /* 落地交接：真图先显示，代理层继续盖在上面两帧再撤——真图首次以终态绘制/栅格化时（大图 + clip-path）
+     若与代理层「同一帧」互换，偶尔会漏出一帧空白/未栅格化的画面 = 闪一下。重叠两帧即可消除。 */
+  function cleanupLater(){
+    if(cleaned) return;
+    unlock();
+    requestAnimationFrame(function(){ requestAnimationFrame(cleanup); });
   }
 
   var box = document.getElementById('lbImgBox');
@@ -8242,7 +8254,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   h.cancel = function(){
     if(h._dead) return; h._dead = true;
     var running = h.playState === 'running';
-    cleanup();
+    if(running) cleanup(); else cleanupLater();
     h.playState = 'idle';
     if(running) img.style.opacity = '';                 // 中途被打断：把真图还原（已完成的由收尾逻辑自己管 opacity）
     img.style.transform = ''; img.style.clipPath = ''; img.style.filter = ''; img.style.transition = prevTr;
@@ -8265,7 +8277,7 @@ function _lbDriveFast(img, t, b, dir, dur){
       }
     }
     img.style.opacity = '';
-    cleanup();                                          // 同一任务内：代理移除 + 真图显示 → 同一帧完成交换
+    cleanupLater();                                     // 真图已显示；代理层再盖两帧后撤掉（见 cleanupLater）
     var f = h.onfinish; if(f) f.call(h);
   };
   /* [perf] 起步预热：代理层刚插入时要做首次绘制 + 大图栅格化/上传纹理，是一次性的主线程重活。
@@ -8273,10 +8285,21 @@ function _lbDriveFast(img, t, b, dir, dur){
      等两帧让它绘制完成，再 play —— 重活发生在动画计时之前。 */
   var all = [aW, aI, aR, aF, aO];
   all.forEach(function(x){ if(x) x.pause(); });
-  requestAnimationFrame(function(){ requestAnimationFrame(function(){
+  h.warming = true;
+  var _started = false;
+  function _start(){
+    if(_started) return; _started = true;
     if(h._dead || h.playState !== 'running') return;
+    h.warming = false;
+    if(dir === 'out') img.style.opacity = '0';          // 代理层已绘制完成，此刻才藏真图，不会漏底
+    var cb = h.onWarmed; h.onWarmed = null;
+    if(cb){ try{ cb(); }catch(e){} }                    // 飞入：此刻才藏缩略图
     all.forEach(function(x){ if(x) x.play(); });
-  }); });
+  }
+  var _dec = (I.decode ? I.decode() : Promise.resolve());
+  Promise.race([_dec.catch(function(){}), new Promise(function(r){ setTimeout(r, 160); })]).then(function(){
+    requestAnimationFrame(function(){ requestAnimationFrame(_start); });
+  });
   return h;
 }
 function _lbDrive(img, t, b, dir, dur){
@@ -8301,13 +8324,14 @@ function _lbFlyIn(idx, tok){
   var a = _lbThumbRect(t, b);
   var p = _lbPose(t, b, a);              // 先量，再隐藏缩略图
   _lbFromTf = '';
-  _lbHideThumb(t);
   img.style.opacity = '';
   _lbCancelAnim();
   _lbFitSide();                          // [perf] 强制布局的量尺放在飞行开始前（文字栏此时仍透明）
   _lbFlyState(true);
   var anim = _lbDrive(img, t, b, 'in', 440);    // 逐帧驱动：img + 遮挡窗同帧更新，实时跟随缩略图
   _lbAnimBox = anim; _lbAnim = anim;
+  // 快速路径要预热几帧：缩略图保持可见直到代理层画好（否则缩略图已藏、代理层未出 = 空白闪一下）
+  if(anim.warming) anim.onWarmed = function(){ _lbHideThumb(t); }; else _lbHideThumb(t);
   anim.onfinish = function(){
     _lbStopTrack();
     if(_lbAnim === anim){
