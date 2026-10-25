@@ -7997,6 +7997,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   var vis = { l: _cl(a.left, w.left, w.right), r: _cl(a.right, w.left, w.right), t: _cl(a.top, w.top, w.bottom), b: _cl(a.bottom, w.top, w.bottom) };
   // 可见部分没有面积（整个被盖住/滚出）：仍交给旧方案处理
   if(needBox && (vis.r - vis.l < 2 || vis.b - vis.t < 2)) return null;
+  var _bxEl = document.getElementById('lbImgBox'), bxr = _bxEl ? _bxEl.getBoundingClientRect() : null;   // 落地交接用
 
   var P = _lbPose(t, b, a, meta);
   var F = { tx: 0, ty: 0, s: 1, r: parseFloat(getComputedStyle(img).borderRadius) || 10 };
@@ -8106,6 +8107,14 @@ function _lbDriveFast(img, t, b, dir, dur){
       img.style.transform = P.transform;
       img.style.clipPath  = P.clip;
       if(hasFilter) img.style.filter = 'brightness(' + FV.b + ') saturate(' + FV.s + ') contrast(' + FV.c + ')';
+      /* 遮挡窗交接：代理层（含 O 窗口）马上要被移除，真图在落地淡出的 ~200ms 里仍留在 #lb 里。
+         和旧方案一样，让 #lbImgBox 带着「缩略图可见矩形」这个窗口接棒，
+         否则缩略图被 tab 栏盖住的那一截会在淡出期间显示在 tab 栏前面（穿模）。
+         窗口随 _finish() → anim.cancel() 一起清掉。 */
+      if(needBox && box && bxr){
+        box.style.clipPath = 'inset(' + [vis.t - bxr.top, bxr.right - vis.r, bxr.bottom - vis.b, vis.l - bxr.left]
+          .map(function(n){ return n.toFixed(1) + 'px'; }).join(' ') + ')';
+      }
     }
     img.style.opacity = '';
     cleanup();                                          // 同一任务内：代理移除 + 真图显示 → 同一帧完成交换
