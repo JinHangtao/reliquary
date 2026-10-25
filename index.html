@@ -7943,6 +7943,7 @@ function _lbBoxFrames(a, dir){
 var _lbThumbPartial = false;
 function _lbCoverClip(t){
   if(!t) return null;
+  if(window._LB_NOCOVER) return null;   // [调试] 控制台 window._LB_NOCOVER = true → 不保留缩略图被遮住的那一截（整张隐藏）
   var a = t.getBoundingClientRect();
   if(a.width < 8 || a.height < 8) return null;
   var w = _lbWindow();
@@ -8487,6 +8488,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   return h;
 }
 function _lbDrive(img, t, b, dir, dur){
+  dur = dur * (window._LB_SLOW > 0 ? window._LB_SLOW : 1);   // [调试] 控制台 window._LB_SLOW = 4 → 飞行放慢 4 倍，便于截图 / 审查元素
   var h = null;
   try{ h = _lbDriveFast(img, t, b, dir, dur); }catch(e){ h = null; }
   return h || _lbDriveSlow(img, t, b, dir, dur);
