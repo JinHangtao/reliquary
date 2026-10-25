@@ -5873,6 +5873,7 @@ function _zoomWobble(dt, vD, D){
   var _cu=new THREE.Vector3(), _panelInnerEl=null;
   function setCamFocus(cr){
     if(!cr){ focusGoal = 0; return; }
+    if(window._lensRefocusNow) window._lensRefocusNow();   // 点击瞬间若正处于“镜头呼吸”模糊中：快速对焦，避免与聚焦镜头叠加
     if(!focusCr || focusW < 0.002) focusSnap = true;    // 从静止开始：锁定起点
     focusCr = cr;
     focusGoal = 1;
@@ -6496,8 +6497,11 @@ resetIdleTimer();
     // ── Focus spring ──
     var _fg = (panelOpen && focusGoal === 1 && focusCr) ? 1 : 0;
     var _fo = _fg ? 4.0 : 4.8;                       // 进入稍慢、退出稍快
-    focusVel += (-_fo*_fo*(focusW - _fg) - 2*_fo*focusVel) * _dt;
-    focusW   += focusVel * _dt;
+    // 掉帧保护：单帧卡顿(dt 很大)时镜头不再“瞬移”一大截，最多按 30fps 的步长推进；
+    // 正常帧(dt<=33ms)完全等价于原实现，不改变任何正常帧的观感
+    var _fdt = Math.min(_dt, 1/30);
+    focusVel += (-_fo*_fo*(focusW - _fg) - 2*_fo*focusVel) * _fdt;
+    focusW   += focusVel * _fdt;
     if(focusW < 0){ focusW = 0; focusVel = 0; }
     if(focusW > 1.02) focusW = 1.02;
     if(!_fg && focusW < 0.0004 && Math.abs(focusVel) < 0.001){ focusW = 0; focusVel = 0; }
@@ -6565,7 +6569,7 @@ resetIdleTimer();
     if(focusE > 0.0004 && focusCr){
       focusCr.group.getWorldPosition(_fv);
       if(focusSnap){ _fPos.copy(_fv); _fYawSign = _fv.x >= 0 ? 1 : -1; focusSnap = false; }
-      else _fPos.lerp(_fv, 1 - Math.exp(-_dt*6));     // 跟随漂浮的石头，带一点延迟
+      else _fPos.lerp(_fv, 1 - Math.exp(-_fdt*6));     // 跟随漂浮的石头，带一点延迟
 
       var _bx = _vpX, _by = _vpY, _bz = _vpZ;   // 起点：当下所在视角的相机位置
       _fd.set(_bx - _fPos.x, _by - _fPos.y, _bz - _fPos.z);
@@ -6715,7 +6719,7 @@ resetIdleTimer();
     if(introsDone       && !_constellationReady) _constellationReady = true;
     if(_constellationReady && !_causticReady)    _causticReady       = true;
     raycaster.setFromCamera(mouse, camera);
-    var hits = introsDone ? raycaster.intersectObjects(allMeshes, true) : [];
+    var hits = (introsDone && !panelOpen) ? raycaster.intersectObjects(allMeshes, true) : [];   // 面板打开时画布被遮住，悬停检测无意义
     var newHovered = -1;
     if(hits.length>0){
       crystals.forEach(function(cr,i){
@@ -6893,7 +6897,7 @@ resetIdleTimer();
       if(cr.isCorner){
         if(focusE > 0.0004 && cr === focusCr){
           // 被点击的角落石头：留在世界空间，让镜头绕着它转；用指数平滑吸收 camCx 的瞬时归零
-          var _ka = 1 - Math.exp(-_dt*12);
+          var _ka = 1 - Math.exp(-_fdt*12);
           cr.group.position.x += (targX - cr.group.position.x) * _ka;
           cr.group.position.y += (targY - cr.group.position.y) * _ka;
           cr.group.position.z += (targZ - cr.group.position.z) * _ka;
@@ -7397,6 +7401,16 @@ if(idleDriftSpeed > 0.000005){
       el.style.transition = 'filter ' + durationMs + 'ms ' + easing;
       el.style.filter     = 'blur(' + blurVal + 'px)';
     }
+
+    // 点击石头时调用：若镜头呼吸模糊正在进行，用 ~0.42s 的“自动对焦”收回，
+    // 而不是让 #three/#constellation/#bg/全部标签 这几张整屏图层的 blur 过渡
+    // 与聚焦镜头、面板 backdrop-filter 同时逐帧重算（这是“概率性”掉帧的主因）。
+    window._lensRefocusNow = function(){
+      if(!_lensBlurred) return;
+      var ease = 'cubic-bezier(.22,1,.36,1)';
+      _setScene(0, 420, ease);
+      (window._labelEls || []).forEach(function(el){ _setLabel(el, 0, 420, ease); });
+    };
 
     function _scheduleLens(){
       // 6–14s base interval — full cycle including blur+hold+refocus lands at ~10–19s perceived gap
