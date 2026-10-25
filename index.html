@@ -7751,6 +7751,8 @@ function _lbBoxFrames(a, dir){
                       : [{ clipPath: full },  { clipPath: small }];
 }
 function _lbHideThumb(t){
+  if(window._lbKeepTh && window._lbKeepTh !== t){ window._lbKeepTh.style.willChange = ''; }
+  window._lbKeepTh = null;
   if(_lbThumb && _lbThumb !== t) _lbThumb.style.visibility = '';
   _lbThumb = t || null;
   if(t) t.style.visibility = 'hidden';
@@ -8338,7 +8340,9 @@ function _lbFlyOut(){
           _lbFromTf = '';
           _lbFlyState(false);
           if(th){                                    // 滤镜交还给 CSS：静止态无变化；仍在 hover 时 .4s 平滑过渡
-            th.style.willChange = '';
+            // 不在此刻降层：.pi-done 的 will-change:auto 会让缩略图此时「掉出」合成层并重新栅格化，
+            // 被 tab 栏磨砂层（backdrop-filter）盖住的那一截会因此重采样、闪一下。留到下次打开灯箱时再还原。
+            window._lbKeepTh = th;
             th.style.removeProperty('transition');
             th.style.removeProperty('filter');
           }
