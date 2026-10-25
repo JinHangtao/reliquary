@@ -745,7 +745,7 @@ body::after {
 .lb.on .lb-bg{opacity:1;}
 .lb:not(.on) .lb-side{-webkit-backdrop-filter:none!important;backdrop-filter:none!important;}
 .lb-wrap{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;gap:0;justify-content:center;margin-top:4vh;}
-.lb-img{flex-shrink:0;position:relative;line-height:0;}
+.lb-img{flex-shrink:0;position:relative;z-index:2;line-height:0;} /* 图片层级高于按钮：放大后图片盖住按钮 */
 .lb-img{touch-action:none;}
 /* 缩放中：去掉大阴影 / 滤镜层 / 毛玻璃文字卡（它会盖在放大的图上，并每帧采样图片做模糊） */
 .lb.lb-zoomed .lb-img img{box-shadow:none;filter:none!important;transition:none!important;}
@@ -801,7 +801,7 @@ body::after {
   #lbSide[style*="opacity: 1"] .lb-desc,#lbSide[style*="opacity: 1"] .lb-rule{transform:none;transition:opacity .2s linear;transition-delay:0s}
 }
 .lb-col{display:flex;flex-direction:column;flex-shrink:0;}
-.lb-btns{display:flex;justify-content:space-between;align-items:center;padding:10px 0;opacity:0;transition:opacity .34s cubic-bezier(.4,0,.2,1);}
+.lb-btns{position:relative;z-index:1;display:flex;justify-content:space-between;align-items:center;padding:10px 0;opacity:0;transition:opacity .34s cubic-bezier(.4,0,.2,1);}
 .lb-btns[style*="opacity: 1"]{transition:none;}
 .lb-btns-left{display:flex;gap:4px;}
 .lb-btns button{background:transparent;border:1px solid var(--line2);color:var(--fg-d);width:22px;height:22px;cursor:none;font-size:.55rem;border-radius:6px;display:flex;align-items:center;justify-content:center;
