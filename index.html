@@ -766,6 +766,8 @@ body::after {
   .lb-side[style*="position: static"] .lb-title{font-size:1.25rem}
   .lb-side[style*="position: static"] .lb-en{margin-bottom:6px}
   .lb-side[style*="position: static"] .lb-rule{margin-bottom:10px}
+  /* 检测到文字栏会超出屏幕 → JS 加 .lb-fit：栏宽收窄，取消行数限制，用更多行展示全部文字 */
+  .lb-side.lb-fit .lb-desc{-webkit-line-clamp:unset;line-clamp:unset;display:block;overflow:visible}
 }
 /* 介绍文字：错落淡入（标题 → 英文名 → 分隔线展开 → 正文），关闭/切图时整体快速淡出。
    JS 只切换 #lbSide 的内联 opacity（0 / 1），这里用属性选择器驱动子元素各自的过渡。 */
@@ -7712,9 +7714,32 @@ function _lbEndClip(img){
   var r = parseFloat(getComputedStyle(img).borderRadius) || 10;
   return 'inset(0px 0px 0px 0px round ' + r + 'px)';
 }
+// 灯箱文字介绍「出屏检测」（仅电脑端、文字在图片右侧的布局）：
+// 量一下文字栏的真实位置，右边超出屏幕 → 收窄栏宽并改成更多行展示全部文字；
+// 下方超出屏幕 → 整体上移。文字栏此时还是透明的，用户看不到调整过程。
+function _lbFitSide(){
+  if(window.innerWidth <= 768) return;
+  var side = document.getElementById('lbSide');
+  if(!side || side.style.position === 'static') return;   // 图上文下的横图布局不在此处理
+  side.classList.remove('lb-fit'); side.style.width = ''; side.style.transform = '';
+  var M = 16, vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  var r = side.getBoundingClientRect();
+  if(!r.width) return;
+  if(r.right > vw - M){
+    side.classList.add('lb-fit');
+    side.style.width = Math.max(80, Math.floor(vw - M - r.left)) + 'px';
+    r = side.getBoundingClientRect();
+  }
+  if(r.bottom > vh - M){
+    var dy = Math.min(r.bottom - (vh - M), Math.max(0, r.top - M));
+    if(dy > 0) side.style.transform = 'translateY(calc(-50% - ' + Math.round(dy) + 'px))';
+  }
+}
+window.addEventListener('resize', function(){ if(window._lbIsOn || (typeof _lbIsOn !== 'undefined' && _lbIsOn)) _lbFitSide(); }, {passive:true});
 function _lbShowSide(tok, delay){
   setTimeout(function(){
     if(tok !== _lbTok || !_lbIsOn) return;
+    _lbFitSide();
     document.getElementById('lbSide').style.opacity = '1';
     var _b = document.querySelector('.lb-btns'); if(_b){ _b.style.pointerEvents = ''; _b.style.opacity = '1'; }
   }, delay);
@@ -8293,11 +8318,6 @@ function _lbShow(idx, opening){
       if(lbSideEl){ lbSideEl.style.position='static'; lbSideEl.style.transform='none';
         lbSideEl.style.left='auto'; lbSideEl.style.top='auto';
         lbSideEl.style.width='100%'; lbSideEl.style.marginTop='14px'; }
-    } else if(lbSideEl && nw && nh){
-      // 文字在图片右侧时：按图片实际显示宽度算出右边剩余空间，文字栏宽度不超过它，避免超出屏幕
-      var _iw = Math.min(nw, window.innerWidth*0.82, window.innerHeight*0.9*nw/nh);
-      var _avail = Math.floor((window.innerWidth - _iw)/2 - 32 - 14);
-      lbSideEl.style.width = Math.max(90, Math.min(188, _avail)) + 'px';
     }
   }
 
@@ -8307,6 +8327,7 @@ function _lbShow(idx, opening){
     src = pre.currentSrc || pre.src;   // 若走了重试地址，用真正加载成功的那个
     commit();
     if(window.innerWidth > 768) layoutDesktop(pre.naturalWidth, pre.naturalHeight);
+    _lbFitSide();
     afterLayout();
   }
 
@@ -8385,6 +8406,7 @@ function _lbGuardReveal(tok){
       img.classList.add('lb-fadein');
     }
   }
+  _lbFitSide();
   document.getElementById('lbSide').style.opacity = '1';
   var _b3 = document.querySelector('.lb-btns'); if(_b3){ _b3.style.pointerEvents = ''; _b3.style.opacity = '1'; }
   // 3) 缩略图应保持隐藏（与灯箱图一一对应）
