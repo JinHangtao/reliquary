@@ -4048,6 +4048,44 @@ window._sceneState = {
     start();
   }
 
+  // ── Grid thumbnail self-heal (mobile) ──
+  // Symptom: thumbnail stays grey (opacity:0 + skeleton) even though the image is loadable / already loaded
+  // (e.g. IntersectionObserver or decode() or the load event never completed). Every 700ms while the panel is
+  // open, and right after the lightbox flies back, make each grid thumbnail reach a final visible state.
+  window._healGridImgs = function(){
+    var imgs = document.querySelectorAll('#panelInner [data-lbidx] img');
+    if(!imgs.length) return;
+    var vh = window.innerHeight || 800;
+    Array.prototype.forEach.call(imgs, function(im){
+      var r = im.getBoundingClientRect();
+      var near = r.bottom > -600 && r.top < vh + 600;
+      if(!near) return;
+      var src = im.getAttribute('src');
+      if(!src){                                           // never started loading → start it now
+        var ds = im.getAttribute('data-src');
+        if(ds){ im.removeAttribute('data-src'); im.src = ds; }
+        return;
+      }
+      if(!im.complete) return;                            // still downloading
+      if(im.naturalWidth){                                // has data but never revealed → reveal now
+        if(!im.classList.contains('pi-in')){
+          var slot = im.parentElement, sk = slot && slot.querySelector('.pi-skel');
+          im.classList.add('pi-in');
+          if(sk){ sk.classList.add('pi-out'); setTimeout(function(){ if(sk.parentNode) sk.parentNode.removeChild(sk); }, 800); }
+          setTimeout(function(){ im.classList.add('pi-done'); }, 1100);
+        }
+      } else {                                            // finished but empty = failed → retry (cache-busted), max 3
+        var n = +(im.dataset.healTry || 0);
+        if(n < 3){
+          im.dataset.healTry = n + 1;
+          var base = src.replace(/([?&])_h=\d+/, '').replace(/[?&]$/, '');
+          im.src = base + (base.indexOf('?') < 0 ? '?' : '&') + '_h=' + Date.now();
+        }
+      }
+    });
+  };
+  setInterval(window._healGridImgs, 700);
+
   function _bindCollapseButtons(root){
     var btns = root.querySelectorAll('[data-clp-body]');
     btns.forEach(function(btn){
@@ -7719,6 +7757,7 @@ function _lbHideThumb(t){
 }
 function _lbRestoreThumb(){
   if(_lbThumb){ _lbThumb.style.visibility = ''; _lbThumb = null; }
+  if(window._healGridImgs){ setTimeout(window._healGridImgs, 0); setTimeout(window._healGridImgs, 400); }
 }
 var _lbTail = null;    // 飞回「落地交接」阶段的句柄：{ fade: 灯箱图淡出动画, th: 缩略图, timer: 延迟定时器 }
 function _lbCancelTail(){
