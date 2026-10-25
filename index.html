@@ -334,7 +334,7 @@ body.panel-open #three { transform:translateX(-3.5vw); }
 #hint {
   position:fixed; bottom:36px; left:50%; transform:translateX(-50%);
   z-index:20; text-align:center;
-  opacity:0; transition:opacity 1s ease;
+  opacity:0; transition:opacity 1s ease; will-change:opacity;
   pointer-events:none;
 }
 #hint.in { opacity:1; }
@@ -6704,13 +6704,23 @@ resetIdleTimer();
   }
   function _dwTick(){
     if(_dwState >= 3) return;
-    if(_viewDrag.active || _viewTouchActive || panelOpen || focusE > 0.0004){ if(_viewDrag.active || _viewTouchActive) _dwState = 3; _dwWait = 0; return; }
+    // 已经在拖了：不再往拖动中途插预热帧
+    if(_viewDrag.active || _viewTouchActive){ _dwState = 3; return; }
+    if(panelOpen || focusE > 0.0004) return;
     if(_dwState === 0){
-      if(introsDone && ++_dwWait > 36) _dwState = 1;           // 入场结束后静止约 0.6s（更早预热，覆盖"一进来就拖"的用户）
+      // [fix] 不再等入场动画结束（原逻辑要等 introsDone 后再静止 ~0.6s，约 6s 以后才预热，
+      // 这期间开始拖动的人会直接跳过预热 = 首次拖动卡顿）。
+      // 现在入场动画开始后约 24 帧（~0.4s）就在入场画面下静默预热：
+      // 预热帧发生在同一次 rAF 内，且真实渲染随后覆盖，入场动画只会多一次极短的帧间隔。
+      if(++_dwWait > 24) _dwState = 1;
       return;
     }
     if(_dwState === 1){ _dwState = 2; try{ _dwRun(true, false); }catch(e){ console.warn('warmup(three):', e); } return; }
-    if(_dwState === 2){ _dwState = 3; try{ _dwRun(false, true); }catch(e){ console.warn('warmup(bg):', e); } }
+    if(_dwState === 2){
+      // 背景视图数据还没就绪就再等几帧，避免 bg 预热被静默跳过
+      if(!(window._bgView && window._bgView.ready && window._bgDraw)){ if(++_dwWait > 240) _dwState = 3; return; }
+      _dwState = 3; try{ _dwRun(false, true); }catch(e){ console.warn('warmup(bg):', e); }
+    }
   }
 
   function animate(){
