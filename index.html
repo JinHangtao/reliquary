@@ -4034,7 +4034,55 @@ window._sceneState = {
     if(_gridIO){ _gridIO.disconnect(); _gridIO = null; }
     if(!imgs.length) return;
     var id = ++_gridLoadId, t0 = Date.now();
-    function load(im){ var s = im.getAttribute('data-src'); if(s){ im.removeAttribute('data-src'); im.src = s; } }
+    // [mobile fix v2] Thumbnails used to point straight at the full-size originals. On phones,
+    // ~25 huge PNG/JPGs decoding at once exceed the image-memory budget, so the browser silently
+    // drops them (blank thumbs) while the lightbox, which loads just one, works fine.
+    // Now: limited concurrency + retry on failure + (touch devices) downscale to a small blob.
+    var _gTouch = (window.matchMedia && window.matchMedia('(pointer:coarse)').matches) || window.innerWidth <= 768;
+    var _gQ = [], _gActive = 0, _gMax = _gTouch ? 2 : 4;
+    function _gPump(){
+      while(_gActive < _gMax && _gQ.length){
+        var job = _gQ.shift(); _gActive++;
+        job(function(){ _gActive--; _gPump(); });
+      }
+    }
+    function _gFetch(im, s, tries, done){
+      var pre = new Image(), url0 = s;
+      pre.onload = function(){
+        var url = pre.currentSrc || pre.src;
+        if(_gTouch && pre.naturalWidth > 900){
+          try{
+            var w = 900, h = Math.max(1, Math.round(pre.naturalHeight * w / pre.naturalWidth));
+            var c = document.createElement('canvas'); c.width = w; c.height = h;
+            var cx = c.getContext('2d'); cx.fillStyle = '#0e0d0c'; cx.fillRect(0,0,w,h);
+            cx.drawImage(pre, 0, 0, w, h);
+            c.toBlob(function(b){
+              im.src = b ? URL.createObjectURL(b) : url;
+              pre.onload = pre.onerror = null; pre.src = '';
+              done();
+            }, 'image/jpeg', 0.82);
+            return;
+          }catch(e){ /* canvas unavailable/tainted → fall through to plain src */ }
+        }
+        im.src = url; done();
+      };
+      pre.onerror = function(){
+        pre.onload = pre.onerror = null;
+        if(tries < 2){
+          setTimeout(function(){
+            _gFetch(im, url0 + (url0.indexOf('?') < 0 ? '?' : '&') + '_t=' + Date.now(), tries + 1, done);
+          }, 300 * (tries + 1));
+        } else { im.src = url0; done(); }
+      };
+      pre.src = s;
+    }
+    function load(im){
+      var s = im.getAttribute('data-src');
+      if(!s) return;
+      im.removeAttribute('data-src');
+      _gQ.push(function(done){ _gFetch(im, s, 0, done); });
+      _gPump();
+    }
     function start(){
       if(id !== _gridLoadId) return;
       if(typeof focusGoal !== 'undefined' && focusGoal && focusE < 0.985 && Date.now() - t0 < 1600){
