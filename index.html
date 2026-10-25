@@ -377,8 +377,8 @@ body.panel-open #three { transform:translateX(-3.5vw); }
   width:clamp(520px,72vw,1100px);
   overflow-y:auto;
   background:linear-gradient(175deg,rgba(18,17,15,.82) 0%,rgba(10,9,8,.88) 100%);
-  backdrop-filter:blur(28px) saturate(1.15) brightness(.92);
-  -webkit-backdrop-filter:blur(28px) saturate(1.15) brightness(.92);
+  /* [perf] 28px backdrop blur over the live WebGL canvas was re-computed every frame; panel is ~85% opaque so it was barely visible */
+  background-color:rgba(10,9,8,.9);
   border-left:1px solid rgba(196,154,82,.10);
   box-shadow:-60px 0 120px rgba(0,0,0,.6);
   transform:translateX(102%);
@@ -900,6 +900,7 @@ img.pi{--pi-f:brightness(1);position:relative;z-index:0;opacity:0;transform:scal
   filter:blur(14px) var(--pi-f);will-change:opacity,filter,transform;
   transition:opacity .6s cubic-bezier(.32,.72,0,1),filter .85s cubic-bezier(.32,.72,0,1),transform .95s cubic-bezier(.32,.72,0,1)!important;}
 img.pi.pi-in{opacity:1;transform:scale(1);filter:blur(0) var(--pi-f);}
+img.pi.pi-flat,img.pi.pi-flat.pi-in{filter:var(--pi-f);transform:none;will-change:opacity;transition:opacity .5s ease!important;}
 img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 @media (prefers-reduced-motion:reduce){
   .pi-skel::before{animation:none}
@@ -3982,6 +3983,7 @@ window._sceneState = {
       img.style.filter = '';
       img.style.transition = '';
       img.classList.add('pi');
+      if(slot.hasAttribute('data-lbidx')) img.classList.add('pi-flat');
 
       var skel = document.createElement('div');
       skel.className = 'pi-skel';
@@ -4010,6 +4012,30 @@ window._sceneState = {
       }, {once:true});
       if(img.complete && img.naturalWidth) ready();
     });
+  }
+
+  // ── Defer grid thumbnails until the focus camera has settled ──
+  // Large scans decoding/uploading during the camera move cause the dropped frames.
+  var _gridLoadId = 0, _gridIO = null;
+  function _deferGridImages(root){
+    var imgs = Array.prototype.slice.call(root.querySelectorAll('img[data-src]'));
+    if(_gridIO){ _gridIO.disconnect(); _gridIO = null; }
+    if(!imgs.length) return;
+    var id = ++_gridLoadId, t0 = Date.now();
+    function load(im){ var s = im.getAttribute('data-src'); if(s){ im.removeAttribute('data-src'); im.src = s; } }
+    function start(){
+      if(id !== _gridLoadId) return;
+      if(typeof focusGoal !== 'undefined' && focusGoal && focusE < 0.985 && Date.now() - t0 < 1600){
+        setTimeout(start, 80); return;
+      }
+      var pin = document.getElementById('panelInner');
+      if(!('IntersectionObserver' in window)){ imgs.forEach(load); return; }
+      _gridIO = new IntersectionObserver(function(es){
+        es.forEach(function(e){ if(e.isIntersecting){ _gridIO.unobserve(e.target); load(e.target); } });
+      }, { root: pin, rootMargin: '500px 0px' });
+      imgs.forEach(function(im){ _gridIO.observe(im); });
+    }
+    start();
   }
 
   function _bindCollapseButtons(root){
@@ -4142,8 +4168,8 @@ window._sceneState = {
         _lbMeta[lbIdx] = { title: img.cn, en: img.en, desc: img.desc || '' };
         var ratio = isTwoCol ? '3/4' : '16/9';
         html += '<div data-lbidx="'+esc(lbIdx)+'" data-lbsrc="'+esc(img.src)+'" data-tilt data-cap onclick="openLb(\''+esc(lbIdx)+'\')" '
-          + 'style="position:relative;overflow:hidden;border-radius:11px;aspect-ratio:'+ratio+';background:#0e0d0c;border:1px solid #1e1c1a;cursor:none;transform-style:preserve-3d;will-change:transform;">'
-          + '<img src="'+esc(img.src)+'" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover;object-position:top;display:block;transition:filter .4s ease;filter:brightness(.78) saturate(.62) contrast(1.06);pointer-events:none">'
+          + 'style="position:relative;overflow:hidden;border-radius:11px;aspect-ratio:'+ratio+';background:#0e0d0c;border:1px solid #1e1c1a;cursor:none;">'
+          + '<img data-src="'+esc(img.src)+'" decoding="async" style="width:100%;height:100%;object-fit:cover;object-position:top;display:block;transition:filter .4s ease;filter:brightness(.78) saturate(.62) contrast(1.06);pointer-events:none">'
           // shine overlay — follows mouse as a radial gradient hotspot
           + '<div class="gi-shine" style="position:absolute;inset:0;pointer-events:none;border-radius:11px;opacity:0;transition:opacity .35s ease;background:radial-gradient(circle at 50% 50%, rgba(255,240,190,.13) 0%, transparent 65%);"></div>'
           + '<div class="gi-cap" style="position:absolute;bottom:0;left:0;right:0;padding:'+(isTwoCol?'16px 14px 13px':'20px 22px 18px')+';background:linear-gradient(transparent,rgba(6,5,4,.9));opacity:0;transform:translateY(5px);transition:opacity .3s ease,transform .3s ease;pointer-events:none">'
@@ -4338,6 +4364,7 @@ window._sceneState = {
     _bindStatCards(panelBody);
     _bindImageCaps(panelBody);
     _bindProgressiveImages(panelBody);
+    _deferGridImages(panelBody);
     panelOpen = true;
     panelEl.classList.add('on');
     document.body.classList.add('panel-open');
@@ -4482,6 +4509,7 @@ window._sceneState = {
 
           if(settled){
             card.style.transform = '';
+            card.style.willChange = '';
             if(shine) shine.style.opacity = '0';
             raf = null;
           } else {
@@ -4491,6 +4519,7 @@ window._sceneState = {
 
         card.addEventListener('mouseenter', function(){
           inside = true;
+          card.style.willChange = 'transform';
           if(shine) shine.style.opacity = '0.4';
           if(!raf) raf = requestAnimationFrame(tick);
         });
@@ -4719,6 +4748,7 @@ window._sceneState = {
   }
 
   function closePanel(){
+    _gridLoadId++; if(_gridIO){ _gridIO.disconnect(); _gridIO = null; }
     if(Date.now() - _panelOpenedAt < 350) return;
     // 灯箱开着（或刚被同一次 Esc 关掉）时，只关灯箱，不连带关面板
     if(document.getElementById('lb').classList.contains('on') || Date.now() - (window._lbClosedAt || 0) < 120) return;
