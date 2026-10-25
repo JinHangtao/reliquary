@@ -730,8 +730,7 @@ body::after {
 .lb.lb-flying .lb-img img{box-shadow:none !important;will-change:transform,clip-path;backface-visibility:hidden;}
 .lb.lb-flying .lb-img{will-change:clip-path;}
 .lb-bg{position:absolute;inset:0;background:rgba(4,3,3,.97);
-  /* [perf] 原来的全屏 backdrop-filter:blur(24px) 在 97% 不透明的黑底上几乎看不出效果，
-     却让飞行的每一帧都对整屏做模糊采样，已移除 */
+  backdrop-filter:blur(24px) saturate(.8);-webkit-backdrop-filter:blur(24px) saturate(.8);
   opacity:0;will-change:opacity;
   transition:opacity .3s cubic-bezier(.4,0,.2,1);}
 .lb.on .lb-bg{opacity:1;}
@@ -740,8 +739,6 @@ body::after {
 .lb-img{touch-action:none;}
 /* 缩放中：去掉大阴影 / 滤镜层 / 毛玻璃文字卡（它会盖在放大的图上，并每帧采样图片做模糊） */
 .lb.lb-zoomed .lb-img img{box-shadow:none;filter:none!important;transition:none!important;}
-/* [perf] 灯箱完全盖住后，底下面板的毛玻璃没有意义；关掉它，飞回开始时再恢复（见 _lbFlyState / openLb） */
-body.lb-cover #panel, body.lb-cover #panel *{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}
 .lb.lb-zoomed .lb-side{opacity:0!important;pointer-events:none;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;}
 .lb-img img{display:block;max-width:82vw;max-height:90vh;object-fit:contain;box-shadow:0 40px 120px rgba(0,0,0,.95);border-radius:10px;}
 @keyframes lbFadeIn{from{opacity:0;filter:blur(10px);}to{opacity:1;filter:none;}}
@@ -7569,7 +7566,6 @@ var _lbTok   = 0;      // 防竞态 token
 var _lbFromTf = '';
 function _lbFlyState(on){
   window._lbFlying = !!on;
-  if(!on && !_lbIsOn){ clearTimeout(window._lbCoverT); document.body.classList.remove('lb-cover'); }
   var e = document.getElementById('lb'); if(e) e.classList.toggle('lb-flying', !!on);
 }    // 飞回的起点 transform（灯箱里放大 / 平移过时 = 当时的内联 transform，否则空）
 var _LB_EASE = 'cubic-bezier(.32,.72,0,1)';
@@ -8397,8 +8393,6 @@ function openLb(idx){
   lb.style.visibility = 'visible';        // 不依赖 .lb 的 visibility 延迟过渡（快速开合时它会卡在 hidden）
   img.style.visibility = 'visible';
   _lbIsOn = true;
-  clearTimeout(window._lbCoverT);
-  window._lbCoverT = setTimeout(function(){ if(_lbIsOn) document.body.classList.add('lb-cover'); }, 340);
   document.body.style.overflow = 'clip';
   lb.addEventListener('touchmove', window._lbTouchMoveProxy, {passive:false});
   _lbShow(idx, true);
