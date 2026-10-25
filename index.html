@@ -9755,12 +9755,15 @@ var _ambBuilt = false, _ambPrepping = false, _ambActivate = null, _audioWanted =
 function _sliceLoop(n, body, done){
   var i = 0;
   function later(){
-    if(window.requestIdleCallback) requestIdleCallback(step, {timeout:300});
+    // 用户已经点击、正等着出声：不再等空闲，直接用 setTimeout 加大每片预算
+    if(_audioWanted) setTimeout(step, 0);
+    else if(window.requestIdleCallback) requestIdleCallback(step, {timeout:300});
     else setTimeout(step, 8);
   }
   function step(dl){
     var t0 = performance.now();
-    var budget = (dl && dl.timeRemaining) ? Math.max(2, dl.timeRemaining() - 1) : 3;
+    var budget = _audioWanted ? 10
+               : ((dl && dl.timeRemaining) ? Math.max(2, dl.timeRemaining() - 1) : 3);
     while(i < n){
       var end = Math.min(n, i + 4096);
       for(; i < end; i++) body(i);
@@ -9845,8 +9848,9 @@ function prewarmAudio(){
       try{ buildAmbient(prep); _ambBuilt = true; } catch(e){ console.warn('Audio:', e); }
       if(_audioWanted && _ambBuilt && _ambActivate) _ambActivate();
     };
-    // Convolver 装载 IR 是主线程重活 —— 同样放到空闲时
-    if(window.requestIdleCallback) requestIdleCallback(run, {timeout:2000});
+    // Convolver 装载 IR 是主线程重活 —— 没人等声音时放到空闲；用户已点击则立刻执行
+    if(_audioWanted) run();
+    else if(window.requestIdleCallback) requestIdleCallback(run, {timeout:2000});
     else setTimeout(run, 50);
   });
 }
@@ -9856,7 +9860,10 @@ function initAudio(){
   _audioWanted = true;
   try{
     if(!AC) prewarmAudio();                       // 手势比预热还早：现在开始，缓冲区仍分片生成
-    if(AC && AC.state !== 'running') AC.resume();
+    if(AC && AC.state !== 'running'){
+      var rp = AC.resume();
+      if(rp && rp.catch) rp.catch(function(){});
+    }
     if(_ambBuilt && _ambActivate) _ambActivate();
   } catch(e){ console.warn('Audio:', e); }
 }
@@ -10118,11 +10125,18 @@ window.addEventListener('load', function(){
     else prewarmAudio();
   }, 2500);
 
-  ['click','touchstart','touchend','keydown'].forEach(function(evt){
-    document.addEventListener(evt, function _init(){
-      initAudio();
-      document.removeEventListener(evt, _init);
-    }, {once:true, passive:true});
+  // capture 阶段先于 canvas/面板的 click 处理，保证"第一次点击"就解锁并出声；
+  // iOS 只认 touchend/click，桌面认 mousedown/pointerup，所以全挂上；
+  // 只有 AudioContext 确认 running 且环境音已激活才移除，避免第一次失败后再也不重试
+  var _unlockEvts = ['pointerdown','pointerup','mousedown','mouseup','touchstart','touchend','click','keydown'];
+  function _unlockAudio(){
+    initAudio();
+    if(AC && AC.state === 'running' && ambStarted){
+      _unlockEvts.forEach(function(e){ document.removeEventListener(e, _unlockAudio, true); });
+    }
+  }
+  _unlockEvts.forEach(function(e){
+    document.addEventListener(e, _unlockAudio, {capture:true, passive:true});
   });
 
   // Panel observer
