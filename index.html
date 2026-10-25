@@ -8293,6 +8293,11 @@ function _lbShow(idx, opening){
       if(lbSideEl){ lbSideEl.style.position='static'; lbSideEl.style.transform='none';
         lbSideEl.style.left='auto'; lbSideEl.style.top='auto';
         lbSideEl.style.width='100%'; lbSideEl.style.marginTop='14px'; }
+    } else if(lbSideEl && nw && nh){
+      // 文字在图片右侧时：按图片实际显示宽度算出右边剩余空间，文字栏宽度不超过它，避免超出屏幕
+      var _iw = Math.min(nw, window.innerWidth*0.82, window.innerHeight*0.9*nw/nh);
+      var _avail = Math.floor((window.innerWidth - _iw)/2 - 32 - 14);
+      lbSideEl.style.width = Math.max(90, Math.min(188, _avail)) + 'px';
     }
   }
 
