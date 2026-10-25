@@ -4003,14 +4003,8 @@ window._sceneState = {
       }
       function ready(){
         // wait until fully decoded so nothing paints row-by-row
-        // [mobile fix] decode() can hang forever on large images (iOS Safari / in-app browsers),
-        // which left the image at opacity:0 and the skeleton spinning. Race it with a short
-        // timeout, and skip decode entirely on touch devices.
-        var _isTouch = window.matchMedia && window.matchMedia('(pointer:coarse)').matches;
-        if(img.decode && !_isTouch){
-          img.decode().then(reveal, reveal);
-          setTimeout(reveal, 1200);
-        } else { reveal(); }
+        // keep waiting for decode (as before) — only add a long safety net in case decode() hangs
+        if(img.decode){ img.decode().then(reveal, reveal); setTimeout(reveal, 5000); } else { reveal(); }
       }
       img.addEventListener('load', ready, {once:true});
       img.addEventListener('error', function(){
@@ -4018,11 +4012,6 @@ window._sceneState = {
         img.classList.add('pi-in','pi-done');
       }, {once:true});
       if(img.complete && img.naturalWidth) ready();
-      // [mobile fix] safety net: if the image has real data but the load event was missed, reveal it
-      var _safety = setInterval(function(){
-        if(shown || !img.isConnected){ clearInterval(_safety); return; }
-        if(img.getAttribute('src') && img.complete && img.naturalWidth){ clearInterval(_safety); reveal(); }
-      }, 700);
     });
   }
 
@@ -4034,55 +4023,7 @@ window._sceneState = {
     if(_gridIO){ _gridIO.disconnect(); _gridIO = null; }
     if(!imgs.length) return;
     var id = ++_gridLoadId, t0 = Date.now();
-    // [mobile fix v2] Thumbnails used to point straight at the full-size originals. On phones,
-    // ~25 huge PNG/JPGs decoding at once exceed the image-memory budget, so the browser silently
-    // drops them (blank thumbs) while the lightbox, which loads just one, works fine.
-    // Now: limited concurrency + retry on failure + (touch devices) downscale to a small blob.
-    var _gTouch = (window.matchMedia && window.matchMedia('(pointer:coarse)').matches) || window.innerWidth <= 768;
-    var _gQ = [], _gActive = 0, _gMax = _gTouch ? 2 : 4;
-    function _gPump(){
-      while(_gActive < _gMax && _gQ.length){
-        var job = _gQ.shift(); _gActive++;
-        job(function(){ _gActive--; _gPump(); });
-      }
-    }
-    function _gFetch(im, s, tries, done){
-      var pre = new Image(), url0 = s;
-      pre.onload = function(){
-        var url = pre.currentSrc || pre.src;
-        if(_gTouch && pre.naturalWidth > 900){
-          try{
-            var w = 900, h = Math.max(1, Math.round(pre.naturalHeight * w / pre.naturalWidth));
-            var c = document.createElement('canvas'); c.width = w; c.height = h;
-            var cx = c.getContext('2d'); cx.fillStyle = '#0e0d0c'; cx.fillRect(0,0,w,h);
-            cx.drawImage(pre, 0, 0, w, h);
-            c.toBlob(function(b){
-              im.src = b ? URL.createObjectURL(b) : url;
-              pre.onload = pre.onerror = null; pre.src = '';
-              done();
-            }, 'image/jpeg', 0.82);
-            return;
-          }catch(e){ /* canvas unavailable/tainted → fall through to plain src */ }
-        }
-        im.src = url; done();
-      };
-      pre.onerror = function(){
-        pre.onload = pre.onerror = null;
-        if(tries < 2){
-          setTimeout(function(){
-            _gFetch(im, url0 + (url0.indexOf('?') < 0 ? '?' : '&') + '_t=' + Date.now(), tries + 1, done);
-          }, 300 * (tries + 1));
-        } else { im.src = url0; done(); }
-      };
-      pre.src = s;
-    }
-    function load(im){
-      var s = im.getAttribute('data-src');
-      if(!s) return;
-      im.removeAttribute('data-src');
-      _gQ.push(function(done){ _gFetch(im, s, 0, done); });
-      _gPump();
-    }
+    function load(im){ var s = im.getAttribute('data-src'); if(s){ im.removeAttribute('data-src'); im.src = s; } }
     function start(){
       if(id !== _gridLoadId) return;
       if(typeof focusGoal !== 'undefined' && focusGoal && focusE < 0.985 && Date.now() - t0 < 1600){
@@ -4094,10 +4035,14 @@ window._sceneState = {
         es.forEach(function(e){ if(e.isIntersecting){ _gridIO.unobserve(e.target); load(e.target); } });
       }, { root: pin, rootMargin: '500px 0px' });
       imgs.forEach(function(im){ _gridIO.observe(im); });
-      // [mobile fix] fallback: anything still not loaded after 2.5s gets loaded anyway
+      // safety net in case the observer never fires: load ONLY images near the viewport (never everything at once)
       setTimeout(function(){
         if(id !== _gridLoadId) return;
-        imgs.forEach(function(im){ if(im.getAttribute('data-src')){ if(_gridIO) _gridIO.unobserve(im); load(im); } });
+        imgs.forEach(function(im){
+          if(!im.getAttribute('data-src')) return;
+          var r = im.getBoundingClientRect();
+          if(r.bottom > -500 && r.top < window.innerHeight + 500){ if(_gridIO) _gridIO.unobserve(im); load(im); }
+        });
       }, 2500);
     }
     start();
