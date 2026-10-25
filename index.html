@@ -4063,6 +4063,7 @@ window._sceneState = {
 
 
   function openPanel(sec){
+    if(window._lensCancel) window._lensCancel();   // [perf] 见 _lensCancel
     // (window._openPanel removed — stat cards now use _bindStatCards closure)
     // Reset hover state immediately — cursor was enlarged on the crystal that was clicked,
     // panel covers the canvas so mousemove stops firing, state would stay stuck otherwise
@@ -4080,7 +4081,7 @@ window._sceneState = {
     // youtube → TOP, before any text
     if(sec.youtube){
       html += '<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;margin-bottom:20px">'
-        + '<iframe src="'+esc(sec.youtube)+'" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>'
+        + '<iframe data-yt-src="'+esc(sec.youtube)+'" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>'
         + '</div>';
     }
 
@@ -4325,6 +4326,15 @@ window._sceneState = {
     }
 
     panelBody.innerHTML = html;
+    // [perf] YouTube 播放器会拉起跨进程 iframe + 大量 JS，正好撞在镜头飞入的前 1 秒 → 卡顿。
+    // 等抽屉滑入、聚焦弹簧基本收敛后再赋 src（位置/尺寸不变，视频照常加载）。
+    var _ytFrames = panelBody.querySelectorAll('iframe[data-yt-src]');
+    if(_ytFrames.length){
+      setTimeout(function(){
+        if(!panelOpen) return;
+        _ytFrames.forEach(function(f){ if(f.isConnected && !f.src) f.src = f.getAttribute('data-yt-src'); });
+      }, 1100);
+    }
     _bindCollapseButtons(panelBody);
     _bindStatCards(panelBody);
     _bindImageCaps(panelBody);
@@ -5870,7 +5880,7 @@ function _zoomWobble(dt, vD, D){
   var _fPos=new THREE.Vector3(), _fv=new THREE.Vector3(), _fd=new THREE.Vector3();
   var _ff=new THREE.Vector3(),  _rt=new THREE.Vector3(), _fUp=new THREE.Vector3(0,1,0);
   var _fq=new THREE.Quaternion(), _fLoc=new THREE.Vector3();
-  var _cu=new THREE.Vector3(), _panelInnerEl=null;
+  var _cu=new THREE.Vector3(), _panelInnerEl=null, _pinW=0, _pinH=0;
   function setCamFocus(cr){
     if(!cr){ focusGoal = 0; return; }
     if(!focusCr || focusW < 0.002) focusSnap = true;    // 从静止开始：锁定起点
@@ -6574,9 +6584,20 @@ resetIdleTimer();
       var _kT   = (_cor ? 0.34 : 0.42);               // 桌面：推近比例
       var _vis  = 0;                                  // 触屏：面板之外真正可见的区域尺寸(px)
       if(isTouchDev){
-        var _pin = _panelInnerEl || (_panelInnerEl = document.querySelector('.panel-inner'));
-        if(isMobile) _vis = Math.max(48, H - (_pin ? _pin.offsetHeight : H*0.91));        // 底部抽屉：只剩顶部一条
-        else         _vis = Math.max(120, W - (_pin ? _pin.offsetWidth  : W*0.72));       // 平板侧栏：只剩左边一列
+        // [perf] 原来每帧读 offsetHeight/offsetWidth，会在面板内容刚写入、样式未稳定的几帧里
+        // 触发同步强制布局（layout thrash）。改为 ResizeObserver 缓存，数值与之前一致。
+        var _pin = _panelInnerEl;
+        if(!_pin){
+          _pin = _panelInnerEl = document.querySelector('.panel-inner');
+          if(_pin){
+            _pinW = _pin.offsetWidth; _pinH = _pin.offsetHeight;                 // 仅首次读取一次
+            if(window.ResizeObserver){
+              new ResizeObserver(function(){ _pinW = _pin.offsetWidth; _pinH = _pin.offsetHeight; }).observe(_pin);
+            }
+          }
+        }
+        if(isMobile) _vis = Math.max(48, H - (_pin ? _pinH : H*0.91));        // 底部抽屉：只剩顶部一条
+        else         _vis = Math.max(120, W - (_pin ? _pinW  : W*0.72));       // 平板侧栏：只剩左边一列
         // 推近后石头不能比可见区域还大：按石头在屏幕上的直径限制推近量
         var _d0 = focusCr.scale * 2 * (H / 540);
         var _kMin = Math.min(1, _d0 / (_vis * 0.8));
@@ -7397,6 +7418,20 @@ if(idleDriftSpeed > 0.000005){
       el.style.transition = 'filter ' + durationMs + 'ms ' + easing;
       el.style.filter     = 'blur(' + blurVal + 'px)';
     }
+
+    // [perf] 点击石头时若“镜头呼吸”的全屏模糊还在进行（defocus/hold/refocus 最长约 8s），
+    // 全屏 WebGL 画布 + #bg + 星座层 + 全部标签的 CSS blur 会和聚焦镜头、面板 backdrop-filter 叠加，
+    // 造成“有概率”的掉帧。点击瞬间直接清掉：此刻有爆裂/冲击波/飞入缩放模糊盖着，肉眼看不出。
+    window._lensCancel = function(){
+      if(!_lensBlurred) return;
+      _lensBlurred = false;
+      if(_lensResetTmr){ clearTimeout(_lensResetTmr); _lensResetTmr = null; }
+      _lensEl.style.transition = 'transform 1.6s cubic-bezier(.4,0,.1,1)';   // 保留 transform 过渡，去掉 filter 过渡 → 立即生效
+      _lensEl.style.filter     = '';
+      _conEl.style.transition  = 'none';  _conEl.style.filter = '';
+      _bgEl.style.transition   = 'none';  _bgEl.style.filter  = '';
+      (window._labelEls || []).forEach(function(el){ el.style.transition = 'none'; el.style.filter = ''; });
+    };
 
     function _scheduleLens(){
       // 6–14s base interval — full cycle including blur+hold+refocus lands at ~10–19s perceived gap
