@@ -9979,14 +9979,18 @@ function _prepareAmbientBuffersWorker(done, fail){
   w.onerror = function(){ if(ended) return; ended = true; kill(); fail(); };
   w.onmessage = function(ev){
     if(ended) return; ended = true; kill();
-    try{
-      var o = ev.data, prep = {};
-      prep.nBuf = AC.createBuffer(1, o.n.length, sr);   prep.nBuf.copyToChannel(o.n, 0);
-      prep.swBuf = AC.createBuffer(1, o.sw.length, sr); prep.swBuf.copyToChannel(o.sw, 0);
-      prep.irBuf = AC.createBuffer(2, o.ir[0].length, sr);
-      prep.irBuf.copyToChannel(o.ir[0], 0); prep.irBuf.copyToChannel(o.ir[1], 1);
-      done(prep);
-    }catch(e){ fail(); }
+    var o = ev.data;
+    // 拷贝 ~11MB 的 Float32Array 是主线程活：等到没有拖动/镜头飞行的空闲期再做
+    _runWhenCalm(function(){
+      try{
+        var prep = {};
+        prep.nBuf = AC.createBuffer(1, o.n.length, sr);   prep.nBuf.copyToChannel(o.n, 0);
+        prep.swBuf = AC.createBuffer(1, o.sw.length, sr); prep.swBuf.copyToChannel(o.sw, 0);
+        prep.irBuf = AC.createBuffer(2, o.ir[0].length, sr);
+        prep.irBuf.copyToChannel(o.ir[0], 0); prep.irBuf.copyToChannel(o.ir[1], 1);
+        done(prep);
+      }catch(e){ fail(); }
+    });
   };
   w.postMessage({sr: sr});
 }
@@ -10023,6 +10027,39 @@ function _prepareAmbientBuffersSliced(done){
   });
 }
 
+/* 拖动 / 灯箱飞行期间不做任何主线程重活 */
+function _isBusyNow(){
+  return document.body.classList.contains('view-dragging') || window._lbFlying;
+}
+function _runWhenCalm(fn){
+  var tries = 0;
+  (function check(){
+    if(_isBusyNow() && tries++ < 150){ setTimeout(check, 200); return; }
+    if(window.requestIdleCallback){
+      requestIdleCallback(function(){
+        // 排队期间用户可能已开始拖动：再查一次
+        if(_isBusyNow() && tries++ < 150){ check(); return; }
+        fn();
+      }, {timeout:1500});
+    } else setTimeout(fn, 30);
+  })();
+}
+/* 预热点击音效会用到的节点类型 / 噪声生成循环（不连接、不发声），
+   避免第一次点击时才首次创建这些节点而卡一下 */
+function _warmSfxPaths(){
+  if(!AC) return;
+  try{
+    var o = AC.createOscillator(), g = AC.createGain(), f = AC.createBiquadFilter();
+    o.type = 'triangle'; f.type = 'lowpass';
+    o.connect(g); g.connect(f);
+    var n = Math.floor(AC.sampleRate * 0.018), b = AC.createBuffer(1, n, AC.sampleRate);
+    var d = b.getChannelData(0), l = 0;
+    for(var i=0;i<n;i++){ l = (l + 0.15*(Math.random()*2-1)) / 1.15; d[i] = l * Math.pow(1 - i/n, 3); }
+    var bs = AC.createBufferSource(); bs.buffer = b; bs.connect(f);
+    bs.disconnect(); o.disconnect(); g.disconnect();
+  }catch(e){}
+}
+
 function prewarmAudio(){
   if(AC || _ambPrepping) return;
   _ambPrepping = true;
@@ -10039,13 +10076,8 @@ function prewarmAudio(){
     // Convolver 装载 IR 是主线程重活 —— 没人等声音时放到空闲；用户已点击则立刻执行
     // 【修复】原来已点击就同步 run()：buildAmbient 里给 16s 立体声 Convolver 装载 IR（主线程做分区 FFT，几十~上百 ms）
     // 恰好落在首次拖动的头几帧。现在：用户正在拖动 / 镜头在动时一律等，等到停手后的空闲再装载。
-    var tries = 0;
-    function safeRun(){
-      var busy = document.body.classList.contains('view-dragging') || window._lbFlying;
-      if(busy && tries++ < 150){ setTimeout(safeRun, 200); return; }
-      if(window.requestIdleCallback) requestIdleCallback(run, {timeout:1500}); else setTimeout(run, 30);
-    }
-    safeRun();
+    // 复查放进空闲回调内部：排队之后用户才开始拖动的情况也能避开
+    _runWhenCalm(function(){ run(); _warmSfxPaths(); });
   });
 }
 
