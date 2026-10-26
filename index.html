@@ -238,6 +238,25 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;1,500;1,600&family=Jost:wght@300;400;500&family=ZCOOL+QingKe+HuangYou&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+<script>
+/* [perf] 首次访问字体门控：字体/中文字体分片在前几秒才下载完，到达时会触发标签重排+重栅格化，
+   正好撞上第一次拖动。这里提前加载字体，并让加载遮罩/入场动画/预热等字体就绪后再开始（3.5s 兜底）。 */
+(function(){
+  window._fontsReady = false; window._warmDone = false;
+  setTimeout(function(){ window._warmDone = true; }, 7000);   // 预热兜底
+  try{ if(/[?&]perf\b/.test(location.search) && window.PerformanceObserver){ new PerformanceObserver(function(l){ l.getEntries().forEach(function(e){ console.log('[longtask] '+Math.round(e.startTime)+'ms +'+Math.round(e.duration)+'ms'); }); }).observe({entryTypes:['longtask']}); } }catch(e){}
+  function fin(){ if(window._fontsReady) return; window._fontsReady = true; }
+  setTimeout(fin, 3500);
+  if(!(document.fonts && document.fonts.load)){ fin(); return; }
+  function ld(spec, txt){ try{ return document.fonts.load(spec, txt); }catch(e){ return Promise.resolve(); } }
+  var latin = [ld("300 16px Jost"), ld("400 16px Jost"), ld("italic 500 16px 'Playfair Display'")];
+  window._fontsKick = function(cnText){
+    Promise.all(latin.concat([ld("16px 'ZCOOL QingKe HuangYou'", cnText || '')]))
+      .then(function(){ return document.fonts.ready; })
+      .then(fin, fin);
+  };
+})();
+</script>
 <style>
 :root {
   --bg:     #111009;
@@ -3523,6 +3542,9 @@ window._sceneState = {
     return el;
   });
   window._labelEls = labelEls; // expose for lens breathing (separate IIFE scope)
+  try{
+    if(window._fontsKick) window._fontsKick(crystals.map(function(c){ return (c.section.cn||'') + (c.section.label||'') + (c.section.num||''); }).join(''));
+  }catch(e){}
 
   // Read label dimensions once after they're in the DOM — cached for the animate loop
   // (avoids per-frame offsetWidth/offsetHeight forced reflow)
@@ -6122,7 +6144,9 @@ resetIdleTimer();
   // ── Dismiss loading overlay ──
   // Crystals are built and intro is about to start — safe to reveal the scene.
   // Small delay so the first frame actually renders before we fade the loader.
-  requestAnimationFrame(function(){
+  (function _dismissWhenReady(){
+    if(window._fontsReady === false || window._warmDone === false){ setTimeout(_dismissWhenReady, 50); return; }
+    requestAnimationFrame(function(){
     requestAnimationFrame(function(){
       var loader = document.getElementById('loader');
       if(loader){
@@ -6131,7 +6155,8 @@ resetIdleTimer();
         setTimeout(function(){ loader.parentNode && loader.parentNode.removeChild(loader); }, 1000);
       }
     });
-  });
+    });
+  })();
 
   // UI fades in after crystals land
   setTimeout(function(){
@@ -6585,6 +6610,7 @@ resetIdleTimer();
   // and reset the clock on visibilitychange/pageshow so hidden time is discarded entirely.
   var clock = new THREE.Clock();
   var t = 0;
+  var _introHold = 0;   // [perf] 字体就绪前入场动画不推进
   var _threeLastHidden = false;
 
   document.addEventListener('visibilitychange', function(){
@@ -6666,7 +6692,7 @@ resetIdleTimer();
     renderer.setRenderTarget(fboUp);       renderer.render(_upScene,      _orthoCam);
     renderer.setRenderTarget(null);        renderer.render(_quadScene,    _orthoCam);
   }
-  function _dwRun(doThree, doBg){
+  function _dwRun(doThree, doBg, eul){
     var cu = _matComposite.uniforms;
     var sp = camera.position.clone(), sq = camera.quaternion.clone();
     var sCA = cu.uCAVel.value, sZ = cu.uZoom.value;
@@ -6675,7 +6701,7 @@ resetIdleTimer();
     var flipped = [], hidden = [];
     try{
       // 转到一个大角度（含滚转）：几乎所有石头都会进出视锥
-      camera.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.5, 1.1, 0.4)));
+      camera.quaternion.multiply(new THREE.Quaternion().setFromEuler(eul || new THREE.Euler(0.5, 1.1, 0.4)));
       camera.updateMatrixWorld(true);
       if(doThree){
         scene.traverse(function(o){
@@ -6707,21 +6733,21 @@ resetIdleTimer();
   function _dwTick(){
     if(_dwState >= 3) return;
     // 已经在拖了：不再往拖动中途插预热帧
-    if(_viewDrag.active || _viewTouchActive){ _dwState = 3; return; }
+    if(_viewDrag.active || _viewTouchActive){ _dwState = 3; window._warmDone = true; return; }
     if(panelOpen || focusE > 0.0004) return;
     if(_dwState === 0){
       // [fix] 不再等入场动画结束（原逻辑要等 introsDone 后再静止 ~0.6s，约 6s 以后才预热，
       // 这期间开始拖动的人会直接跳过预热 = 首次拖动卡顿）。
       // 现在入场动画开始后约 24 帧（~0.4s）就在入场画面下静默预热：
       // 预热帧发生在同一次 rAF 内，且真实渲染随后覆盖，入场动画只会多一次极短的帧间隔。
-      if(++_dwWait > 24) _dwState = 1;
+      if(++_dwWait > 6) _dwState = 1;
       return;
     }
-    if(_dwState === 1){ _dwState = 2; try{ _dwRun(true, false); }catch(e){ console.warn('warmup(three):', e); } return; }
+    if(_dwState === 1){ _dwState = 2; try{ _dwRun(true, false); _dwRun(true, false, new THREE.Euler(-0.7, -1.6, -0.3)); }catch(e){ console.warn('warmup(three):', e); } return; }
     if(_dwState === 2){
       // 背景视图数据还没就绪就再等几帧，避免 bg 预热被静默跳过
-      if(!(window._bgView && window._bgView.ready && window._bgDraw)){ if(++_dwWait > 240) _dwState = 3; return; }
-      _dwState = 3; try{ _dwRun(false, true); }catch(e){ console.warn('warmup(bg):', e); }
+      if(!(window._bgView && window._bgView.ready && window._bgDraw)){ if(++_dwWait > 240){ _dwState = 3; window._warmDone = true; } return; }
+      _dwState = 3; try{ _dwRun(false, true); }catch(e){ console.warn('warmup(bg):', e); } window._warmDone = true;
     }
   }
 
@@ -6733,6 +6759,7 @@ resetIdleTimer();
     // (screen lock, tab switch) only advances t by at most ~5 frames — no phase jump.
     var _dt = Math.min(clock.getDelta(), 0.08);
     t += _dt;
+    if(window._fontsReady === false || window._warmDone === false) _introHold = t;   // 字体未就绪：入场时间基准持续后移（动画停在第 0 帧）
 
     // Panel open → gently slow crystals, not freeze them
     var targetSlow = panelOpen ? 0.32 : 1.0;
@@ -6990,7 +7017,7 @@ resetIdleTimer();
       // ── Intro: drive introT, override position until landed ──
       var introActive = cr.introT < 1.0;
       if(introActive){
-        var elapsed = Math.max(0, t - cr.introDelay);
+        var elapsed = Math.max(0, t - _introHold - cr.introDelay);
         cr.introT = Math.min(elapsed / INTRO_DUR, 1.0);
         var p = easeOutExpo(cr.introT);
 
@@ -9401,6 +9428,31 @@ document.addEventListener('keydown', function(e){
 (function(){
 'use strict';
 
+/* ─── Debug（默认关闭）：网址后加 ?perfdebug 即可在控制台看到 longtask 与音频各阶段耗时 ─── */
+var _PD = /[?&]perfdebug\b/.test(location.search);
+function _plog(m){ if(_PD) console.log('[audio] ' + m + ' @' + performance.now().toFixed(0) + 'ms'); }
+if(_PD && window.PerformanceObserver){
+  try{ new PerformanceObserver(function(l){ l.getEntries().forEach(function(e){
+    console.warn('[longtask] ' + e.duration.toFixed(0) + 'ms @' + e.startTime.toFixed(0) + 'ms');
+  }); }).observe({entryTypes:['longtask']}); }catch(e){}
+}
+
+/* 用户是否正在操作（按下 / 拖动 / 滚轮 / 刚松手）。音频里的主线程重活（Convolver 装载）只在“真空闲”时做。 */
+var _ptrDown = false, _lastPtrT = -1e9;
+(function(){
+  function down(){ _ptrDown = true; _lastPtrT = performance.now(); }
+  function up(){ _ptrDown = false; _lastPtrT = performance.now(); }
+  function act(){ _lastPtrT = performance.now(); }
+  ['pointerdown','mousedown','touchstart'].forEach(function(n){ document.addEventListener(n, down, {capture:true, passive:true}); });
+  ['pointerup','pointercancel','mouseup','touchend','touchcancel'].forEach(function(n){ document.addEventListener(n, up, {capture:true, passive:true}); });
+  ['wheel','touchmove'].forEach(function(n){ document.addEventListener(n, act, {capture:true, passive:true}); });
+  window.addEventListener('blur', up);
+})();
+function _audioBusy(){
+  return _ptrDown || (performance.now() - _lastPtrT < 700)
+      || document.body.classList.contains('view-dragging') || !!window._lbFlying;
+}
+
 /* ─── State ─────────────────────────────────────────────── */
 var AC           = null;
 var masterGain   = null;
@@ -9410,9 +9462,13 @@ var ambStarted   = false;
 var audioReady   = false;
 
 /* ─── Helpers ───────────────────────────────────────────── */
+var _fadeEnd = 0;   // 环境音首次淡入的结束时刻（AC 时间）
 function ramp(param, target, time){
   if(!AC) return;
   var t = AC.currentTime;
+  // 首次淡入期间若又有 masterGain 的动作（点第一下打开面板 → audioPanelOpen），原来会砍掉淡入并在 0.6s 内猛拉音量；
+  // 现在时长至少拉到淡入结束，音量平滑过渡。
+  if(masterGain && param === masterGain.gain && t < _fadeEnd) time = Math.max(time, _fadeEnd - t);
   param.cancelScheduledValues(t);
   param.setValueAtTime(param.value, t);
   param.linearRampToValueAtTime(target, t + time);
@@ -9685,6 +9741,7 @@ function buildAmbient(prep){
   _ambActivate = function(){
     if(ambStarted) return;
     ambStarted = true;
+    _fadeEnd = AC.currentTime + 4.0;
     ramp(masterGain.gain, 0.78, 4.0);
     audioReady = true;
     setTimeout(scheduleBeacon, 6000); // first beacon after 6s
@@ -10006,17 +10063,26 @@ function prewarmAudio(){
   } catch(e){ AC = null; _ambPrepping = false; console.warn('Audio:', e); return; }
   _prepareAmbientBuffers(function(prep){
     var run = function(){
+      var _t0 = performance.now();
       try{ buildAmbient(prep); _ambBuilt = true; } catch(e){ console.warn('Audio:', e); }
+      _plog('buildAmbient ' + (performance.now() - _t0).toFixed(0) + 'ms on main thread');
       if(_audioWanted && _ambBuilt && _ambActivate) _ambActivate();
     };
     // Convolver 装载 IR 是主线程重活 —— 没人等声音时放到空闲；用户已点击则立刻执行
     // 【修复】原来已点击就同步 run()：buildAmbient 里给 16s 立体声 Convolver 装载 IR（主线程做分区 FFT，几十~上百 ms）
     // 恰好落在首次拖动的头几帧。现在：用户正在拖动 / 镜头在动时一律等，等到停手后的空闲再装载。
+    // 【再修复】原来只在“排队前”检查一次忙闲；requestIdleCallback 真正执行时用户可能已经按下鼠标开始拖，
+    // Convolver 装载（几十~上百 ms 的主线程重活）就砸在首次拖动的头几帧上 = 概率性卡顿。
+    // 现在：排队前、真正执行前各检查一次，忙就再等；最多等 ~30s，之后无论如何都装载（保证声音一定会出来）。
     var tries = 0;
     function safeRun(){
-      var busy = document.body.classList.contains('view-dragging') || window._lbFlying;
-      if(busy && tries++ < 150){ setTimeout(safeRun, 200); return; }
-      if(window.requestIdleCallback) requestIdleCallback(run, {timeout:1500}); else setTimeout(run, 30);
+      if(_audioBusy() && tries++ < 150){ setTimeout(safeRun, 200); return; }
+      if(window.requestIdleCallback){
+        requestIdleCallback(function(){
+          if(_audioBusy() && tries++ < 150){ setTimeout(safeRun, 200); return; }
+          run();
+        }, {timeout:1500});
+      } else setTimeout(run, 30);
     }
     safeRun();
   });
@@ -10025,6 +10091,7 @@ function prewarmAudio(){
 /* ─── Init（用户手势：只做轻量激活）────────────────────── */
 function initAudio(){
   _audioWanted = true;
+  _plog('initAudio (gesture) state=' + (AC ? AC.state : 'no-AC') + ' built=' + _ambBuilt);
   try{
     if(!AC) prewarmAudio();                       // 手势比预热还早：现在开始，缓冲区仍分片生成
     if(AC && AC.state !== 'running'){
@@ -10295,7 +10362,10 @@ window.addEventListener('load', function(){
   // capture 阶段先于 canvas/面板的 click 处理，保证"第一次点击"就解锁并出声；
   // iOS 只认 touchend/click，桌面认 mousedown/pointerup，所以全挂上；
   // 只有 AudioContext 确认 running 且环境音已激活才移除，避免第一次失败后再也不重试
-  var _unlockEvts = ['pointerdown','pointerup','mousedown','mouseup','touchstart','touchend','click','keydown'];
+  // 【再修复】原来 pointerdown/mousedown/touchstart 也会 resume() + 预热，恰好落在第一次拖动的起手帧。
+  // 现在只在“松手”类事件里解锁：松手本身就是用户手势（Safari/iOS/Firefox 都认 mouseup/touchend/click），
+  // Chrome 看的是粘性激活（按下那一刻已满足）。代价：第一次拖动时环境音在松手后才淡入。
+  var _unlockEvts = ['pointerup','mouseup','touchend','click','keydown'];
   function _unlockAudio(){
     initAudio();
     if(AC && AC.state === 'running' && ambStarted){
