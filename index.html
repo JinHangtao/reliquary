@@ -9428,31 +9428,6 @@ document.addEventListener('keydown', function(e){
 (function(){
 'use strict';
 
-/* ─── Debug（默认关闭）：网址后加 ?perfdebug 即可在控制台看到 longtask 与音频各阶段耗时 ─── */
-var _PD = /[?&]perfdebug\b/.test(location.search);
-function _plog(m){ if(_PD) console.log('[audio] ' + m + ' @' + performance.now().toFixed(0) + 'ms'); }
-if(_PD && window.PerformanceObserver){
-  try{ new PerformanceObserver(function(l){ l.getEntries().forEach(function(e){
-    console.warn('[longtask] ' + e.duration.toFixed(0) + 'ms @' + e.startTime.toFixed(0) + 'ms');
-  }); }).observe({entryTypes:['longtask']}); }catch(e){}
-}
-
-/* 用户是否正在操作（按下 / 拖动 / 滚轮 / 刚松手）。音频里的主线程重活（Convolver 装载）只在“真空闲”时做。 */
-var _ptrDown = false, _lastPtrT = -1e9;
-(function(){
-  function down(){ _ptrDown = true; _lastPtrT = performance.now(); }
-  function up(){ _ptrDown = false; _lastPtrT = performance.now(); }
-  function act(){ _lastPtrT = performance.now(); }
-  ['pointerdown','mousedown','touchstart'].forEach(function(n){ document.addEventListener(n, down, {capture:true, passive:true}); });
-  ['pointerup','pointercancel','mouseup','touchend','touchcancel'].forEach(function(n){ document.addEventListener(n, up, {capture:true, passive:true}); });
-  ['wheel','touchmove'].forEach(function(n){ document.addEventListener(n, act, {capture:true, passive:true}); });
-  window.addEventListener('blur', up);
-})();
-function _audioBusy(){
-  return _ptrDown || (performance.now() - _lastPtrT < 700)
-      || document.body.classList.contains('view-dragging') || !!window._lbFlying;
-}
-
 /* ─── State ─────────────────────────────────────────────── */
 var AC           = null;
 var masterGain   = null;
@@ -9462,13 +9437,9 @@ var ambStarted   = false;
 var audioReady   = false;
 
 /* ─── Helpers ───────────────────────────────────────────── */
-var _fadeEnd = 0;   // 环境音首次淡入的结束时刻（AC 时间）
 function ramp(param, target, time){
   if(!AC) return;
   var t = AC.currentTime;
-  // 首次淡入期间若又有 masterGain 的动作（点第一下打开面板 → audioPanelOpen），原来会砍掉淡入并在 0.6s 内猛拉音量；
-  // 现在时长至少拉到淡入结束，音量平滑过渡。
-  if(masterGain && param === masterGain.gain && t < _fadeEnd) time = Math.max(time, _fadeEnd - t);
   param.cancelScheduledValues(t);
   param.setValueAtTime(param.value, t);
   param.linearRampToValueAtTime(target, t + time);
@@ -9741,7 +9712,6 @@ function buildAmbient(prep){
   _ambActivate = function(){
     if(ambStarted) return;
     ambStarted = true;
-    _fadeEnd = AC.currentTime + 4.0;
     ramp(masterGain.gain, 0.78, 4.0);
     audioReady = true;
     setTimeout(scheduleBeacon, 6000); // first beacon after 6s
@@ -10063,26 +10033,17 @@ function prewarmAudio(){
   } catch(e){ AC = null; _ambPrepping = false; console.warn('Audio:', e); return; }
   _prepareAmbientBuffers(function(prep){
     var run = function(){
-      var _t0 = performance.now();
       try{ buildAmbient(prep); _ambBuilt = true; } catch(e){ console.warn('Audio:', e); }
-      _plog('buildAmbient ' + (performance.now() - _t0).toFixed(0) + 'ms on main thread');
       if(_audioWanted && _ambBuilt && _ambActivate) _ambActivate();
     };
     // Convolver 装载 IR 是主线程重活 —— 没人等声音时放到空闲；用户已点击则立刻执行
     // 【修复】原来已点击就同步 run()：buildAmbient 里给 16s 立体声 Convolver 装载 IR（主线程做分区 FFT，几十~上百 ms）
     // 恰好落在首次拖动的头几帧。现在：用户正在拖动 / 镜头在动时一律等，等到停手后的空闲再装载。
-    // 【再修复】原来只在“排队前”检查一次忙闲；requestIdleCallback 真正执行时用户可能已经按下鼠标开始拖，
-    // Convolver 装载（几十~上百 ms 的主线程重活）就砸在首次拖动的头几帧上 = 概率性卡顿。
-    // 现在：排队前、真正执行前各检查一次，忙就再等；最多等 ~30s，之后无论如何都装载（保证声音一定会出来）。
     var tries = 0;
     function safeRun(){
-      if(_audioBusy() && tries++ < 150){ setTimeout(safeRun, 200); return; }
-      if(window.requestIdleCallback){
-        requestIdleCallback(function(){
-          if(_audioBusy() && tries++ < 150){ setTimeout(safeRun, 200); return; }
-          run();
-        }, {timeout:1500});
-      } else setTimeout(run, 30);
+      var busy = document.body.classList.contains('view-dragging') || window._lbFlying;
+      if(busy && tries++ < 150){ setTimeout(safeRun, 200); return; }
+      if(window.requestIdleCallback) requestIdleCallback(run, {timeout:1500}); else setTimeout(run, 30);
     }
     safeRun();
   });
@@ -10091,7 +10052,6 @@ function prewarmAudio(){
 /* ─── Init（用户手势：只做轻量激活）────────────────────── */
 function initAudio(){
   _audioWanted = true;
-  _plog('initAudio (gesture) state=' + (AC ? AC.state : 'no-AC') + ' built=' + _ambBuilt);
   try{
     if(!AC) prewarmAudio();                       // 手势比预热还早：现在开始，缓冲区仍分片生成
     if(AC && AC.state !== 'running'){
@@ -10362,10 +10322,7 @@ window.addEventListener('load', function(){
   // capture 阶段先于 canvas/面板的 click 处理，保证"第一次点击"就解锁并出声；
   // iOS 只认 touchend/click，桌面认 mousedown/pointerup，所以全挂上；
   // 只有 AudioContext 确认 running 且环境音已激活才移除，避免第一次失败后再也不重试
-  // 【再修复】原来 pointerdown/mousedown/touchstart 也会 resume() + 预热，恰好落在第一次拖动的起手帧。
-  // 现在只在“松手”类事件里解锁：松手本身就是用户手势（Safari/iOS/Firefox 都认 mouseup/touchend/click），
-  // Chrome 看的是粘性激活（按下那一刻已满足）。代价：第一次拖动时环境音在松手后才淡入。
-  var _unlockEvts = ['pointerup','mouseup','touchend','click','keydown'];
+  var _unlockEvts = ['pointerdown','pointerup','mousedown','mouseup','touchstart','touchend','click','keydown'];
   function _unlockAudio(){
     initAudio();
     if(AC && AC.state === 'running' && ambStarted){
