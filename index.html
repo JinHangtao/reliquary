@@ -10034,6 +10034,18 @@ function prewarmAudio(){
   _prepareAmbientBuffers(function(prep){
     var run = function(){
       try{ buildAmbient(prep); _ambBuilt = true; } catch(e){ console.warn('Audio:', e); }
+      // 顺便在空闲期把点击噪声缓冲备好，首次点击零分配
+      try{
+        if(!_clickNoiseBuf){
+          var _ns = Math.floor(AC.sampleRate * 0.018);
+          _clickNoiseBuf = AC.createBuffer(1, _ns, AC.sampleRate);
+          var _nd = _clickNoiseBuf.getChannelData(0), _nl = 0;
+          for(var _i=0; _i<_ns; _i++){
+            _nl = (_nl + 0.15*(Math.random()*2-1)) / 1.15;
+            var _q = 1 - _i/_ns; _nd[_i] = _nl * _q * _q * _q;
+          }
+        }
+      }catch(e){}
       if(_audioWanted && _ambBuilt && _ambActivate) _ambActivate();
     };
     // Convolver 装载 IR 是主线程重活 —— 没人等声音时放到空闲；用户已点击则立刻执行
@@ -10067,6 +10079,7 @@ function initAudio(){
 // Three layers: warm body (triangle), low octave (sine), subtle inharmonic bell partial.
 // No noise tick — replaced with a very brief pink-ish low-pass burst for "touch" texture.
 // Five presets randomised on each call; additional micro-jitter makes every hit unique.
+var _clickNoiseBuf = null;
 function playCrystalClick(){
   if(!AC || !audioReady) return;
   var t = AC.currentTime;
@@ -10134,14 +10147,18 @@ function playCrystalClick(){
 
   // ── Touch texture — pink-ish noise, low-passed at 800Hz, barely audible ──
   // Replaces the harsh 3k–8k tick with just a soft "contact" feel
-  var nSmp = Math.floor(AC.sampleRate * 0.018);
-  var nBuf = AC.createBuffer(1, nSmp, AC.sampleRate);
-  var nd = nBuf.getChannelData(0), nL = 0;
-  for(var i=0; i<nSmp; i++){
-    nL = (nL + 0.15*(Math.random()*2-1)) / 1.15; // pink-ish integration
-    nd[i] = nL * Math.pow(1 - i/nSmp, 3);        // fast cubic fade
+  // 缓存：整个会话只生成一次（原来每次点击都 createBuffer + 循环 pow）
+  if(!_clickNoiseBuf){
+    var nSmp = Math.floor(AC.sampleRate * 0.018);
+    _clickNoiseBuf = AC.createBuffer(1, nSmp, AC.sampleRate);
+    var nd = _clickNoiseBuf.getChannelData(0), nL = 0;
+    for(var i=0; i<nSmp; i++){
+      nL = (nL + 0.15*(Math.random()*2-1)) / 1.15; // pink-ish integration
+      var q = 1 - i/nSmp;
+      nd[i] = nL * q * q * q;                      // fast cubic fade
+    }
   }
-  var nSrc = AC.createBufferSource(); nSrc.buffer = nBuf;
+  var nSrc = AC.createBufferSource(); nSrc.buffer = _clickNoiseBuf;
   var nLP  = AC.createBiquadFilter(); nLP.type = 'lowpass'; nLP.frequency.value = 800;
   var nGn  = AC.createGain(); nGn.gain.value = 0.055 + Math.random()*0.02;
   nSrc.connect(nLP); nLP.connect(nGn); nGn.connect(masterFilter);
@@ -10322,7 +10339,10 @@ window.addEventListener('load', function(){
   // capture 阶段先于 canvas/面板的 click 处理，保证"第一次点击"就解锁并出声；
   // iOS 只认 touchend/click，桌面认 mousedown/pointerup，所以全挂上；
   // 只有 AudioContext 确认 running 且环境音已激活才移除，避免第一次失败后再也不重试
-  var _unlockEvts = ['pointerdown','pointerup','mousedown','mouseup','touchstart','touchend','click','keydown'];
+  // 【修复首次拖动卡顿】按下(pointerdown/mousedown/touchstart)时不再 resume AudioContext：
+  // 启动音频设备/渲染线程会落在拖动的第一帧。改为松手(up/end/click)或按键时才解锁，
+  // 这些事件同样属于合法用户手势（iOS 只认 touchend/click），环境音本来就是 4s 淡入，听感无差别。
+  var _unlockEvts = ['pointerup','mouseup','touchend','click','keydown'];
   function _unlockAudio(){
     initAudio();
     if(AC && AC.state === 'running' && ambStarted){
