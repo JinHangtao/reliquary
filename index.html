@@ -10354,7 +10354,7 @@ window.addEventListener('load', function(){
   // capture 阶段先于 canvas/面板的 click 处理，保证"第一次点击"就解锁并出声；
   // iOS 只认 touchend/click，桌面认 mousedown/pointerup，所以全挂上；
   // 只有 AudioContext 确认 running 且环境音已激活才移除，避免第一次失败后再也不重试
-  var _unlockEvts = ['pointerdown','pointerup','mousedown','mouseup','touchstart','touchend','click','keydown'];
+  var _unlockEvts = ['pointerup','mouseup','touchend','click','keydown'];  // [perf] 去掉按下类事件：首次拖动的按下不再触发 AC.resume()，松手时才唤醒音频
   function _unlockAudio(){
     initAudio();
     if(AC && AC.state === 'running' && ambStarted){
