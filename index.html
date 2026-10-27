@@ -2729,7 +2729,7 @@ window._sceneState = {
       sub:'REAPER · Age 18',
       body:'使用 REAPER 进行声音设计与音效制作，探索音景构建与动态混音。\n\nSound design in REAPER. Soundscape construction, foley, and dynamic mixing for interactive and cinematic contexts.',
       audio:[
-        {src:'images/sound-01.mp3', cover:'images/sound-cover-01.jpg',
+        {src:'images/sound-01.mp3', cover:'images/sound-cover-01.jpg', dur:'3:10',
          title:'40多亿年的故事',
          desc:'这个音频作品3分10秒压缩了40多亿年的地球初期历史，用声音讲地球从一开始到多细胞生命出现的故事。前面是地球刚形成时的混乱和喷发的岩浆，用尖锐的声音表现；然后慢慢听到水流声和气泡声，像单细胞生命慢慢冒出来；最后多细胞生命登场。'}
       ]
@@ -2817,7 +2817,7 @@ window._sceneState = {
     var base = Math.min(dpr * ssaa, isMobile ? 1.75 : 2.25);
     var area = Math.max(1, window.innerWidth * 1.08 * window.innerHeight);   // 画布比视口宽 8%
     var r = Math.max(1.0, Math.min(base, Math.sqrt(_PX_BUDGET / area)));
-    return Math.max(0.7, r * window._prScale);
+    return Math.max(0.7, r * window._prScale * (window._introScale || 1));
   }
   var renderer = new THREE.WebGLRenderer({ canvas:canvas, antialias:false, alpha:true,
     powerPreference: isMobile ? 'low-power' : 'high-performance' });
@@ -4213,6 +4213,20 @@ window._sceneState = {
   }
 
 
+  // [perf] 声音面板的 <audio> 改为按需加载：
+  // 以前每次进入面板都会立刻请求 mp3 + 解析元数据 + 建立解码管线，正好撞上拖动视角的几帧。
+  // 现在只有悬停/点击播放键、点进度条时才加载；总时长由数据里的 dur 预先显示。
+  window._pnlAudLoad = function(au){
+    if(!au || au.getAttribute('data-ld') === '1') return;
+    var s = au.getAttribute('data-src'); if(!s) return;
+    au.setAttribute('data-ld', '1');
+    var r = au.playbackRate;                 // load() 会把倍速重置，先存起来
+    au.preload = 'auto';
+    au.src = s;
+    try{ au.load(); }catch(e){}
+    try{ au.defaultPlaybackRate = r; au.playbackRate = r; }catch(e){}
+  };
+
   function openPanel(sec){
     // (window._openPanel removed — stat cards now use _bindStatCards closure)
     // Reset hover state immediately — cursor was enlarged on the crystal that was clicked,
@@ -4315,12 +4329,12 @@ window._sceneState = {
           + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
           + '<span id="'+pti+'" style="font-size:.52rem;color:#4a4642;font-family:Jost,sans-serif;width:28px">0:00</span>'
           + '<div id="'+brid+'" class="audio-bar" style="flex:1;height:3px;background:#262320;border-radius:2px;cursor:pointer;position:relative" '
-          + 'onclick="(function(e,el){var r=el.getBoundingClientRect();var au=document.getElementById(\''+pid+'\');au.currentTime=(e.clientX-r.left)/r.width*au.duration;})(event,this)" '
-          + 'ontouchstart="(function(e,el){e.preventDefault();var r=el.getBoundingClientRect();var au=document.getElementById(\''+pid+'\');au.currentTime=(e.touches[0].clientX-r.left)/r.width*au.duration;})(event,this)">'
+          + 'onclick="(function(e,el){var r=el.getBoundingClientRect();var au=document.getElementById(\''+pid+'\');window._pnlAudLoad&&window._pnlAudLoad(au);if(!au.duration)return;au.currentTime=(e.clientX-r.left)/r.width*au.duration;})(event,this)" '
+          + 'ontouchstart="(function(e,el){e.preventDefault();var r=el.getBoundingClientRect();var au=document.getElementById(\''+pid+'\');window._pnlAudLoad&&window._pnlAudLoad(au);if(!au.duration)return;au.currentTime=(e.touches[0].clientX-r.left)/r.width*au.duration;})(event,this)">'
           + '<div id="'+pri+'" style="height:100%;width:0%;background:#c49a52;border-radius:2px;transition:width .1s linear;position:absolute;top:0;left:0"></div></div>'
-          + '<span id="'+pdi+'" style="font-size:.52rem;color:#4a4642;font-family:Jost,sans-serif;width:28px">0:00</span>'
+          + '<span id="'+pdi+'" style="font-size:.52rem;color:#4a4642;font-family:Jost,sans-serif;width:28px">'+(a.dur||'0:00')+'</span>'
           + '</div>'
-          + '<button id="'+bid+'" onclick="(function(btn,pid){var au=document.getElementById(pid);if(au.paused){au.play();btn.textContent=\'▐▐\';}else{au.pause();btn.textContent=\'▶\';}})(this,\''+pid+'\')" '
+          + '<button id="'+bid+'" onpointerenter="window._pnlAudLoad&&window._pnlAudLoad(document.getElementById(\''+pid+'\'))" onclick="(function(btn,pid){var au=document.getElementById(pid);window._pnlAudLoad&&window._pnlAudLoad(au);if(au.paused){au.play();btn.textContent=\'▐▐\';}else{au.pause();btn.textContent=\'▶\';}})(this,\''+pid+'\')" '
           + 'style="background:none;border:1px solid #8c6d38;color:#c49a52;font-size:.6rem;padding:7px 20px;border-radius:7px;cursor:pointer;font-family:Jost,sans-serif;letter-spacing:.2em">▶</button>'
           + '<div style="display:flex;gap:5px;margin-left:10px;align-items:center">'
           + '<span style="font-family:Jost,sans-serif;font-size:.46rem;letter-spacing:.18em;text-transform:uppercase;color:#4a4642">Speed</span>'
@@ -4339,10 +4353,10 @@ window._sceneState = {
             }).join('')
           + '</div>'
           + '</div></div>';
-        html += '<audio id="'+pid+'" '
+        html += '<audio id="'+pid+'" loop preload="none" data-src="'+esc(a.src)+'" '
           + 'ontimeupdate="(function(au){var p=document.getElementById(\''+pri+'\');var t=document.getElementById(\''+pti+'\');if(au.duration){p.style.width=(au.currentTime/au.duration*100)+\'%\';var m=Math.floor(au.currentTime/60);t.textContent=m+\':\'+(\'0\'+Math.floor(au.currentTime%60)).slice(-2);}})(this)" '
           + 'onloadedmetadata="(function(au){var d=document.getElementById(\''+pdi+'\');var m=Math.floor(au.duration/60);d.textContent=m+\':\'+(\'0\'+Math.floor(au.duration%60)).slice(-2);})(this)">'
-          + '<source src="'+esc(a.src)+'" type="audio/mpeg"></audio>';
+          + '</audio>';
       });
     }
 
@@ -6592,6 +6606,27 @@ resetIdleTimer();
     _applyFboSize();
   };
 
+  // ── [perf] 入场虚化期间降分辨率 ─────────────────────────────────────
+  // 开头 #three 被 CSS 模糊 8px、#bg 被模糊 22px，这时画面里没有任何高频细节，
+  // 却仍在以全分辨率渲染场景 + 7 个 bloom pass，再被浏览器整屏模糊一遍；
+  // 此时拖动视角，每帧都是「高清渲染 + 整屏大半径模糊」叠加，GPU 吃紧就掉帧。
+  // 做法：模糊期间只把 WebGL 渲染分辨率降到 0.7×，肉眼看不出区别；
+  // 模糊几乎褪完（#three 的 2.8s 过渡走到约 2.3s，残余模糊 <0.3px）时再恢复原分辨率。
+  // 恢复若恰好遇到用户正在拖动，最多再等 0.8s，避免恢复那一帧（重建 FBO）撞上拖动。
+  (function(){
+    window._introScale = 0.7;
+    window._applyPxRatio();
+    var _waited = 0;
+    function _restore(){
+      if(document.body.classList.contains('view-dragging') && _waited < 800){
+        _waited += 100; setTimeout(_restore, 100); return;
+      }
+      window._introScale = 1;
+      window._applyPxRatio();
+    }
+    setTimeout(_restore, 4200 + 2300);   // 与上面 setTimeout(…, 4200) 里开始褪模糊的时刻对齐
+  })();
+
   // Pre-clear all FBOs — GPU memory is uninitialised, shows as grid on first frame
   [fboScene, fboExtract, fboDown, fboDown2, fboUp2, fboUp].forEach(function(rt){
     renderer.setRenderTarget(rt);
@@ -6662,6 +6697,7 @@ resetIdleTimer();
   var _gvN = 0, _gvAcc = 0, _gvLast = 0, _gvCool = 60, _gvSteps = 0;
   function _governor(){
     var now = performance.now(), d = now - _gvLast; _gvLast = now;
+    if(window._introScale && window._introScale < 1){ _gvCool = 60; return; }   // [perf] 入场虚化期间不采样、不降档
     if(d <= 0 || d > 120 || document.hidden) return;        // 忽略切标签页/长卡顿造成的异常间隔
     if(_gvCool > 0){ _gvCool--; return; }
     _gvAcc += d; _gvN++;
