@@ -5211,9 +5211,10 @@ window._sceneState = {
   function _gauss(){ return (Math.random()+Math.random()+Math.random()-1.5) / 0.5; }   // ≈ N(0,1)
   function _volPoint(out, k){
     k = k || 1;
-    out.x = (Math.random()-.5) * visW * 2.1 * k;
-    out.y = (Math.random()-.5) * visH * 2.1 * k;
-    out.z = (Math.random()-.5) * 700 * k;
+    // [扩大可见区域] 横纵向 2.1→2.9 倍屏幕半宽/半高（含屏幕外侧，边缘与角落也能看到石头经过），景深 700→960
+    out.x = (Math.random()-.5) * visW * 2.9 * k;
+    out.y = (Math.random()-.5) * visH * 2.9 * k;
+    out.z = (Math.random()-.5) * 960 * k;
     return out;
   }
   // 偏向屏幕平面的随机方向（纯朝向镜头的流动几乎看不出来，所以 z 分量压小）
