@@ -964,7 +964,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 #langMenu.open::before{opacity:1;transition:opacity .9s ease .2s}
 
 /* inner layer keeps its final size, so nothing reflows while the shell grows around it */
-.lang-in{position:absolute;left:0;top:0;box-sizing:border-box;width:calc(var(--w1,212px) - 2px);padding:var(--hh,32px) 6px 6px}
+.lang-in{position:absolute;left:0;top:0;box-sizing:border-box;width:calc(var(--w1,212px) - 2px);padding:calc(var(--hh,32px) + 8px) 6px 6px}  /* +8px：分隔线与首项金光之间留出间隙，避免两条金色渐变贴在一起 */
 .lang-spot{position:absolute;inset:0;pointer-events:none;background:radial-gradient(170px circle at var(--mx,40%) var(--my,30%),rgba(232,200,128,.085),rgba(232,200,128,0) 70%);opacity:0;transition:opacity .6s ease}
 #langMenu.open:hover .lang-spot{opacity:1}
 
