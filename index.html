@@ -47,6 +47,7 @@
 <meta property="og:locale" content="zh_CN">
 <meta property="og:locale:alternate" content="zh_TW">
 <meta property="og:locale:alternate" content="en_US">
+<meta property="og:locale:alternate" content="it_IT">
 <meta property="og:site_name" content="Jin Hangtao | 金航滔">
 
 <!-- ══ Twitter / X Card ══ -->
@@ -97,7 +98,7 @@
         "Photography", "Sound Design", "REAPER",
         "After Effects", "Video Production", "Interactive Web Design"
       ],
-      "inLanguage": ["zh-CN", "zh-TW", "en"],
+      "inLanguage": ["zh-CN", "zh-TW", "en", "it"],
       "mainEntityOfPage": { "@id": "https://jinhangtao.com/#profilepage" },
       "sameAs": [
         "https://jinhangtao.com/",
@@ -125,7 +126,7 @@
       "creator": { "@id": "https://jinhangtao.com/#person" },
       "datePublished": "2025-01-01",
       "dateModified": "2026-03-27",
-      "inLanguage": ["zh-CN", "zh-TW", "en"],
+      "inLanguage": ["zh-CN", "zh-TW", "en", "it"],
       "breadcrumb": {
         "@type": "BreadcrumbList",
         "itemListElement": [
@@ -146,7 +147,7 @@
       "alternateName": ["jinhangtao portfolio", "金航滔作品集", "Jin HT Art"],
       "url": "https://jinhangtao.com/",
       "description": "Jin Hangtao (金航滔) 的个人艺术作品集网站，基于 Three.js 构建的沉浸式数字艺术展览。",
-      "inLanguage": ["zh-CN", "zh-TW", "en"],
+      "inLanguage": ["zh-CN", "zh-TW", "en", "it"],
       "author": { "@id": "https://jinhangtao.com/#person" },
       "publisher": { "@id": "https://jinhangtao.com/#person" },
       "copyrightHolder": { "@id": "https://jinhangtao.com/#person" },
@@ -949,15 +950,16 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 
 #langMenu{position:absolute;z-index:1;left:0;top:0;box-sizing:border-box;overflow:hidden;border-radius:18px;
   width:var(--w0,60px);height:var(--h0,32px);
-  background:linear-gradient(155deg,rgba(40,35,25,.82) 0%,rgba(22,20,13,.9) 55%,rgba(16,14,9,.94) 100%);
-  -webkit-backdrop-filter:blur(22px) saturate(1.4);backdrop-filter:blur(22px) saturate(1.4);
+  background:linear-gradient(155deg,rgba(40,35,25,.55) 0%,rgba(22,20,13,.6) 55%,rgba(16,14,9,.65) 100%);
+  /* [perf] 去掉 backdrop-filter：它要对下面实时 WebGL 画布逐帧重采样，面板展开时每帧都在重算 */
+  will-change:width,height,opacity;contain:layout style;transform:translateZ(0);
   border:1px solid rgba(212,168,90,.15);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,0),0 0 0 1px rgba(0,0,0,0),0 28px 60px -14px rgba(0,0,0,0),0 8px 20px -8px rgba(0,0,0,0);
-  opacity:0;visibility:hidden;pointer-events:none;
-  transition:width .5s var(--ease-io),height .5s var(--ease-io),opacity .3s ease .2s,box-shadow .4s ease,visibility 0s linear .55s}
-#langMenu.open{width:var(--w1,212px);height:var(--h1,150px);opacity:1;visibility:visible;pointer-events:auto;
+  /* [perf] 阴影固定不做过渡（大半径阴影逐帧重绘很贵），由 opacity 淡入淡出 */
   box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(0,0,0,.35),0 28px 60px -14px rgba(0,0,0,.72),0 8px 20px -8px rgba(0,0,0,.5);
-  transition:width .85s var(--ease-out),height .85s var(--ease-out),opacity .12s linear,box-shadow .7s ease .05s,visibility 0s}
+  opacity:0;visibility:hidden;pointer-events:none;
+  transition:width .5s var(--ease-io),height .5s var(--ease-io),opacity .3s ease .2s,visibility 0s linear .55s}
+#langMenu.open{width:var(--w1,212px);height:var(--h1,150px);opacity:1;visibility:visible;pointer-events:auto;
+  transition:width .85s var(--ease-out),height .85s var(--ease-out),opacity .12s linear,visibility 0s}
 #langMenu::before{content:"";position:absolute;z-index:2;top:0;left:22px;right:22px;height:1px;background:linear-gradient(90deg,transparent,rgba(232,200,128,.6),transparent);opacity:0;pointer-events:none;transition:opacity .25s ease}
 #langMenu.open::before{opacity:1;transition:opacity .9s ease .2s}
 
@@ -982,7 +984,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 #langMenu.open .lang-item{opacity:1;transform:none;
   transition:opacity .55s var(--ease-out) calc(140ms + var(--i,0)*48ms),transform .8s var(--ease-out) calc(140ms + var(--i,0)*48ms),color .35s ease}
 .lang-item b{flex:none;width:26px;font:500 .8rem/1 'Jost','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;letter-spacing:.06em;color:var(--gold-d);transition:color .35s ease}
-.lang-item[data-lang="en"] b{font-family:'Playfair Display',serif;font-style:italic;font-size:.95rem;letter-spacing:.02em}
+.lang-item[data-lang="en"] b,.lang-item[data-lang="it"] b{font-family:'Playfair Display',serif;font-style:italic;font-size:.95rem;letter-spacing:.02em}
 .lang-item span{display:block;transition:transform .7s var(--ease-out)}
 .lang-item:hover span,.lang-item:focus-visible span{transform:translateX(3px)}
 .lang-ck{flex:none;margin-left:auto;width:12px;height:9px;fill:none;stroke:var(--gold);stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
@@ -7839,7 +7841,7 @@ if(idleDriftSpeed > 0.000005){
         var panelOn = document.body.classList.contains('panel-open');
         var _lbEl   = document.getElementById('lb');
         var lbOn    = _lbEl ? _lbEl.classList.contains('on') : false;
-        if(!panelOn && !lbOn && _lensIdleReady){
+        if(!panelOn && !lbOn && _lensIdleReady && !document.body.classList.contains('lang-busy')){
           var els = window._labelEls || [];
 
           // ── Three weight tiers — each breath is drawn randomly ──
@@ -10643,14 +10645,15 @@ document.addEventListener('keydown', e => {
   var LANGS = [
     {c:'zh-CN', s:'简', n:'简体中文'},
     {c:'zh-TW', s:'繁', n:'繁體中文'},
-    {c:'en',    s:'EN', n:'English'}
+    {c:'en',    s:'EN', n:'English'},
+    {c:'it',    s:'IT', n:'Italiano'}
   ];
   var KEY = 'jht-lang', cur = 'zh-CN';
 
   var UI = {
-    'ident.sub': {'zh-CN':'Portfolio','zh-TW':'Portfolio','en':'Portfolio'},
-    'lang.cap': {'zh-CN':'语言','zh-TW':'語言','en':'Language'},
-    'hint': {'zh-CN':'拖动探索 · 滚动靠近 · 点击进入','zh-TW':'拖曳探索 · 滾動靠近 · 點擊進入','en':'Drag to explore · Scroll to move closer · Click to enter'}
+    'ident.sub': {'zh-CN':'Portfolio','zh-TW':'Portfolio','en':'Portfolio','it':'Portfolio'},
+    'lang.cap': {'zh-CN':'语言','zh-TW':'語言','en':'Language','it':'Lingua'},
+    'hint': {'zh-CN':'拖动探索 · 滚动靠近 · 点击进入','zh-TW':'拖曳探索 · 滾動靠近 · 點擊進入','en':'Drag to explore · Scroll to move closer · Click to enter','it':'Trascina per esplorare · Scorri per avvicinarti · Clicca per entrare'}
   };
 
   var A = function(u,t){ return '<a href="'+u+'" target="_blank" style="color:var(--gold);text-decoration:none;border-bottom:1px solid var(--gold-d);">'+t+'</a>'; };
@@ -10665,16 +10668,62 @@ document.addEventListener('keydown', e => {
     'Everything here was made at 18 or younger. I will keep exploring more interesting things and tools, leaving them on the blog or building a separate platform. Thank you to everyone on the other side of the screen \uD83D\uDE04'
   ].join('\n\n');
 
+  var ABOUT_IT = [
+    'Strumenti originali per sviluppo, design e impaginazione — Online: ' + A('https://atelier-mise.vercel.app/en','Atelier Mise — un banco di lavoro dove processo e risultato convivono'),
+    'Blog: ' + A('https://jinhangtao.github.io/blog','Blog') + SEP + 'Spazio audiovisivo meditativo: ' + A('https://jinhangtao.github.io/Breathwheel/','Breathwheel') + SEP,
+    'La Terra è nata dalla lenta aggregazione della materia dell’universo. Quest’opera usa cristalli alla deriva come metafora di quel processo: forse da qualche parte nel cosmo esiste una scena simile, senza meta, ma che per caso finisce per unirsi in un pianeta. L’attrazione del mouse rappresenta la gravità: è il tuo arrivo a mettere tutto in movimento.',
+    'Questo portfolio è stato realizzato con VS Code, ospitato su GitHub, con un servizio backend-as-a-service per i commenti. L’ho sviluppato a 19 anni (2025–2026) per tenere traccia del mio blog quotidiano e per conservare e condividere i lavori e i ricordi di prima dei 18 anni. Oggi siamo ancora giovani.',
+    'Le opere nelle sezioni Blog e Lavori sono state create tra i 13 e i 18 anni — nello studio del liceo annesso all’Accademia di Belle Arti Lu Xun, poi ampliandosi alla modellazione 3D mentre preparavo il portfolio. A 18 anni sono entrato all’Accademia di Belle Arti di Roma, dove ho incontrato sound design, fotografia e generazione di immagini con l’IA. Sto ancora esplorando.',
+    'Se la pittura è passiva e obbediente, sento chiaramente che sarebbe una strada di cui mi pentirei e che mi renderebbe triste — per questo, per l’ammissione all’accademia, ho scelto altri campi, come le Nuove Tecnologie per l’Arte.',
+    'Tutto qui è stato fatto a 18 anni o prima. Continuerò a esplorare cose e strumenti più interessanti, lasciandoli sul blog o costruendo una piattaforma a parte. Grazie a tutti quelli dall’altra parte dello schermo \uD83D\uDE04'
+  ].join('\n\n');
+
+  var IT_CAP = {
+    'David Bust · Graphite · Age 16':'Busto di David · Grafite · 16 anni',
+    'Parents · Oil · Age 16':'Genitori · Olio · 16 anni',
+    'Self-Portrait · Oil · Age 15':'Autoritratto · Olio · 15 anni',
+    'Female Portrait · Graphite · Age 14':'Ritratto femminile · Grafite · 14 anni',
+    'Studio Window · Graphite · Age 15':'Finestra dello studio · Grafite · 15 anni',
+    'Upward Gaze · Mixed · Age 14':'Sguardo verso l’alto · Tecnica mista · 14 anni',
+    'Frontal · Graphite · Age 16':'Frontale · Grafite · 16 anni',
+    'Ionic Capital · Graphite · Age 14':'Capitello ionico · Grafite · 14 anni',
+    'Restroom · Graphite · Age 15':'Bagno · Grafite · 15 anni',
+    'Father and Child · Graphite · Age 16':'Padre e figlio · Grafite · 16 anni',
+    'Child in Coat · Graphite · Age 15':'Bambino col cappotto · Grafite · 15 anni',
+    'Self-Portrait Standing · Graphite · Age 15':'Autoritratto in piedi · Grafite · 15 anni',
+    'Black Woman · Charcoal · Age 14':'Donna nera · Carboncino · 14 anni',
+    'Male Bust · Graphite · Age 16':'Busto maschile · Grafite · 16 anni',
+    'Ballet Dancer · Graphite · Age 16':'Ballerino · Grafite · 16 anni',
+    'Man Leaning Sideways · Graphite · Age 16':'Uomo inclinato di lato · Grafite · 16 anni',
+    'Apollo · Graphite · Age 16':'Apollo · Grafite · 16 anni',
+    'Damoxenos · Graphite · Age 16':'Damosseno · Grafite · 16 anni',
+    'Male Figure · Graphite · Age 16':'Figura maschile · Grafite · 16 anni',
+    'Female Seated Leaning · Charcoal · Age 16':'Donna seduta inclinata · Carboncino · 16 anni',
+    'Male Portrait · Charcoal · Age 16':'Ritratto maschile · Carboncino · 16 anni',
+    'Studies Laid Out · Charcoal · Ages 14–16':'Studi disposti · Carboncino · 14–16 anni',
+    'Four Portrait Studies · Charcoal · Age 16':'Quattro studi di ritratto · Carboncino · 16 anni',
+    'Portrait Group · Charcoal & Graphite · Age 14':'Gruppo di ritratti · Carboncino e grafite · 14 anni',
+    'Mixed Studies · Various Media · Age 14':'Studi misti · Tecniche varie · 14 anni',
+    'Studies Composite · Charcoal · Ages 13–14':'Composizione di studi · Carboncino · 13–14 anni',
+    '3D Modeling · Age 18':'Modellazione 3D · 18 anni',
+    '3D Modeling · Age 17':'Modellazione 3D · 17 anni',
+    'Photography · Age 18':'Fotografia · 18 anni',
+    'ComfyUI · Stable Diffusion · Age 18':'ComfyUI · Stable Diffusion · 18 anni',
+    'Poster Design · Photoshop':'Design di poster · Photoshop',
+    'Folded Posters · Illustrator':'Poster piegati · Illustrator',
+    'Book Cover Design · Photoshop':'Copertina di libro · Photoshop'
+  };
+
   var SEC = {
-    about:   {cn:{'zh-TW':'關於',en:'Introduction'}, sub:{en:'Jin Hangtao · 2025–2026'}, body:{en:ABOUT_EN}},
-    blog:    {cn:{'zh-TW':'部落格',en:'Journal'},     sub:{en:'Daily · Writing · Jin Hangtao'}},
-    painting:{cn:{'zh-TW':'繪畫',en:'Drawing'}},
-    '3d':    {cn:{'zh-TW':'三維',en:'3D'}},
-    photo:   {cn:{'zh-TW':'攝影',en:'Photo'}},
-    ai:      {cn:{'zh-TW':'AI生成',en:'Generative'}},
-    sound:   {cn:{'zh-TW':'聲音',en:'Sound'}},
-    video:   {cn:{'zh-TW':'影像',en:'Moving image'}},
-    stmt:    {cn:{'zh-TW':'平面設計',en:'Design'}}
+    about:   {cn:{'zh-TW':'關於',en:'Introduction',it:'Introduzione'}, sub:{en:'Jin Hangtao · 2025–2026',it:'Jin Hangtao · 2025–2026'}, body:{en:ABOUT_EN,it:ABOUT_IT}},
+    blog:    {cn:{'zh-TW':'部落格',en:'Journal',it:'Diario'},     sub:{en:'Daily · Writing · Jin Hangtao',it:'Quotidiano · Scrittura · Jin Hangtao'}},
+    painting:{cn:{'zh-TW':'繪畫',en:'Drawing',it:'Disegno'}},
+    '3d':    {cn:{'zh-TW':'三維',en:'3D',it:'3D'}},
+    photo:   {cn:{'zh-TW':'攝影',en:'Photo',it:'Fotografia'}},
+    ai:      {cn:{'zh-TW':'AI生成',en:'Generative',it:'Generativa'}},
+    sound:   {cn:{'zh-TW':'聲音',en:'Sound',it:'Suono'}},
+    video:   {cn:{'zh-TW':'影像',en:'Moving image',it:'Immagine in movimento'}},
+    stmt:    {cn:{'zh-TW':'平面設計',en:'Design',it:'Grafica'}}
   };
 
   var CJK = /[\u3400-\u9fff]/;
@@ -10776,9 +10825,50 @@ document.addEventListener('keydown', e => {
     }
   };
 
+
+  POSTS['Atelier-Mise'].it = {
+    title: '<em>5</em> mesi di sviluppo in solitaria: ho costruito un nuovo tipo di editor a tela',
+    body: [
+      'Sono passati esattamente cinque mesi dalla prima idea a oggi. Non so quante volte ho mollato, ma ogni volta che tornavo demolivo quello che avevo e lo riscrivevo. È difficile chiamare questo processo “divertente” — somiglia più a una sofferenza.',
+      'L’app si chiama ' + PA('Atelier Mise') + ', un editor a tela autonomo. Pensa liberamente su una tela senza confini, poi esporta direttamente il risultato.',
+      null,
+      '<section-break>Funzioni principali, tutte sviluppate internamente per una struttura controllabile</section-break>',
+      'Molti bug mi hanno preso giorni, solo per scoprire alla fine di essermi scavato la buca da solo due settimane prima. Alcune funzioni hanno avuto tre o quattro versioni, e quella che ho usato alla fine era la prima e la più semplice. Seduto lì a fissare lo schermo, ti viene davvero da chiederti perché ti sei messo a farlo.',
+      null,
+      'Ma non riuscivo a fermarmi. Non trovavo uno strumento che volessi davvero usare — uno in cui il processo di pensiero e il risultato finale stessero nello stesso posto, senza andare avanti e indietro. Costruirlo da solo era una via d’uscita.',
+      null,
+      '<section-break>Com’è adesso</section-break>',
+      'Tela libera, movimento libero tra le pagine, collegamenti con linee, modifica delle immagini ed esportazione dell’impaginazione — catturando solo il contenuto della pagina in HTML, PPT o WORD.',
+      'Disponibile Online e Offline. Versione online: ' + PA('atelier-mise.vercel.app'),
+      null,
+      'Cinque mesi, e volevo portarlo a termine. È il mio regalo di 20 anni a me stesso.'
+    ]
+  };
+  POSTS['成瘾性和意志关系'].it = {
+    title: 'Dipendenza e forza di volontà',
+    body: 'La forza di volontà non è la cura della dipendenza. Da piccolo, fissato con i videogiochi e a stare alzato fino a tardi, pensavo fosse un problema di volontà e autocontrollo. Poi, guardando dei video di neuroscienze, ho scoperto una piccola struttura chiamata nucleo accumbens — grande quanto un’arachide, eppure alla guida di quasi ogni comportamento che ti impedisce di fermarti.\nLa dopamina che rilascia non è il piacere in sé ma l’attesa del piacere. Meno ottieni, più speranza ed eccitazione conservi. Per questo finisci un video e subito ne guardi un altro: non perché il precedente fosse così bello, ma perché il prossimo potrebbe esserlo di più.\nLa dipendenza non è mancanza di impegno. I circuiti del cervello sono stati addestrati in una direzione di cui ci pentiamo e che non riusciamo a controllare. Contro questo, la forza di volontà è come lanciare un uovo contro una roccia.\nMa, cosa interessante, disegnare, fare sport e creare possono attivare lo stesso punto. Il cervello non giudica prima se una cosa ti fa bene; si lascia guidare più facilmente da come ti senti adesso. Quindi, invece di scontrarti di petto con il tuo cervello, nutrilo con qualcos’altro.'
+  };
+  POSTS['开源模型'].it = {
+    title: 'Modello open source',
+    body: 'Consiglio vivamente questo modello di generazione IA per ComfyUI — è quello che uso di più: https://civitai.com/models/133005/juggernaut-xl\nDopo averlo scaricato, mettilo nella cartella checkpoints, che si trova in C:\\Users\\[nome utente]\\Documents\\ComfyUI\\models.'
+  };
+  POSTS['japan，第一次出國'].it = { title: 'Giappone, il mio primo viaggio all’estero', body: 'Mi sono ricordato del mio primo viaggio all’estero, nel 2019, prima della pandemia. Mi emoziona ancora molto.' };
+  POSTS['貓貓'].it = { title: 'Gattino', body: 'Ho trovato un gattino-maialino 🐖, ma non avevo niente con me, così ho solo scattato una foto — un po’ noioso.' };
+  POSTS['聖誕樹'].it = { title: 'Albero di Natale', body: 'Un grazioso alberello 🎄 Buon Natale 🦌' };
+  POSTS['我開創了我的 blog'].it = { title: 'Ho aperto il mio blog', body: 'Ho costruito un sito blog. I contenuti sono ancora in aggiornamento, eheh — vieni a farci un giro (è divertente).' };
+
   var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   // 日期随语言变格式：英文 → "Jun 6, 2026" / "Winter 2025"；中文保持原样
+  var MON_IT = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+  var SEAS_IT = {winter:'Inverno',spring:'Primavera',summer:'Estate',autumn:'Autunno',fall:'Autunno'};
   function fmtDate(d){
+    if(cur === 'it' && typeof d === 'string'){
+      var mi = d.match(/^\s*(\d{4})\s*\u00b7\s*(\d{1,2})\s*\u00b7\s*(\d{1,2})\s*$/);
+      if(mi){ var moi = MON_IT[+mi[2] - 1]; return moi ? (+mi[3]) + ' ' + moi + ' ' + mi[1] : d; }
+      mi = d.match(/^\s*(\d{4})\s*\u00b7\s*(Winter|Spring|Summer|Autumn|Fall)\s*$/i);
+      if(mi) return SEAS_IT[mi[2].toLowerCase()] + ' ' + mi[1];
+      return d;
+    }
     if(cur !== 'en' || typeof d !== 'string') return d;
     var m = d.match(/^\s*(\d{4})\s*\u00b7\s*(\d{1,2})\s*\u00b7\s*(\d{1,2})\s*$/);
     if(m){ var mo = MON[+m[2] - 1]; return mo ? mo + ' ' + (+m[3]) + ', ' + m[1] : d; }
@@ -10811,14 +10901,14 @@ document.addEventListener('keydown', e => {
     if((v = pick(o.cn)))   c.cn   = v;
     if((v = pick(o.sub)))  c.sub  = v;
     if((v = pick(o.body))) c.body = v;
-    else if(cur === 'en' && typeof c.body === 'string' && c.body) c.body = enParas(c.body);
+    else if((cur === 'en' || cur === 'it') && typeof c.body === 'string' && c.body) c.body = enParas(c.body);
     if(sec.posts && sec.posts.length){
       c.posts = sec.posts.map(localizePost);
     }
-    if(cur === 'en' && sec.images){
+    if((cur === 'en' || cur === 'it') && sec.images){
       c.images = sec.images.map(function(im){
         var n = {}, q; for(q in im) n[q] = im[q];
-        if(im.en){ n.cn = im.en; n.en = ''; }
+        if(im.en){ n.cn = (cur === 'it' && IT_CAP[im.en]) || im.en; n.en = ''; }
         return n;
       });
     }
@@ -10840,6 +10930,7 @@ document.addEventListener('keydown', e => {
       if(/^zh-(tw|hk|mo|hant)/.test(l)) return 'zh-TW';
       if(/^zh/.test(l)) return 'zh-CN';
       if(/^en/.test(l)) return 'en';
+      if(/^it/.test(l)) return 'it';
     }
     return 'en';
   }
@@ -10900,9 +10991,13 @@ document.addEventListener('keydown', e => {
     cur = code;
     try{ localStorage.setItem(KEY, code); }catch(e){}
     apply(true);
-    try{ window.dispatchEvent(new CustomEvent('i18n:change', {detail:{lang:code}})); }catch(e){}
+    // 面板整体重绘（innerHTML）很重：错开到菜单「停留」阶段，不与展开/收起动画同帧
+    setTimeout(function(){
+      try{ window.dispatchEvent(new CustomEvent('i18n:change', {detail:{lang:code}})); }catch(e){}
+    }, 160);
   }
 
+  var busyT = 0;
   function isOpen(){ return menu.classList.contains('open'); }
   function items(){ return Array.prototype.slice.call(menu.querySelectorAll('.lang-item')); }
   function activeItem(){ return menu.querySelector('[aria-checked="true"]') || items()[0]; }
@@ -10935,6 +11030,8 @@ document.addEventListener('keydown', e => {
 
   function open(){
     measure(); void menu.offsetWidth;                 // commit the pill geometry so the transition starts from it
+    clearTimeout(busyT); document.body.classList.add('lang-busy');           // 菜单动画期间暂停背景「镜头模糊」
+    try{ if(window._lensRefocusNow) window._lensRefocusNow(); }catch(_e){}
     menu.classList.remove('picking'); menu.classList.add('open'); ident.classList.add('lang-open');
     moveGlow(activeItem(), true);
     btn.setAttribute('aria-expanded','true'); menu.setAttribute('aria-hidden','false');
@@ -10943,6 +11040,7 @@ document.addEventListener('keydown', e => {
   function close(ret){
     if(isOpen()) measure();                           // chip label may have changed width: collapse onto the new one
     menu.classList.remove('open'); ident.classList.remove('lang-open');
+    clearTimeout(busyT); busyT = setTimeout(function(){ document.body.classList.remove('lang-busy'); }, 1100);
     btn.setAttribute('aria-expanded','false'); menu.setAttribute('aria-hidden','true');
     document.body.classList.remove('hovering');
     if(ret) btn.focus({preventScroll:true});
@@ -10970,7 +11068,9 @@ document.addEventListener('keydown', e => {
       b.addEventListener('click', function(){
         if(menu.classList.contains('picking')) return;
         menu.classList.add('picking');            // let the check mark draw before the panel folds back into the chip
-        moveGlow(b); set(L.c);
+        moveGlow(b);
+        // 点击这一帧只做轻量的高亮；文字替换 / 面板重绘放到下一帧之后，避免和菜单动画挤在同一帧
+        requestAnimationFrame(function(){ requestAnimationFrame(function(){ set(L.c); }); });
         setTimeout(function(){ close(true); }, 520);
       });
       b.addEventListener('mouseenter', function(){ moveGlow(b); });
