@@ -4876,53 +4876,95 @@ window._sceneState = {
     var _pi     = document.getElementById('panelInner');
     var _ph     = document.querySelector('.panel-head');
     var _swSy   = 0, _swTracking = false, _swDy = 0;
-    var _swThreshold = 80;
+    var _swLastY = 0, _swLastT = 0, _swVel = 0;   // px/ms, 向下为正
+    var _swClosing = false;
+    var _pbg = document.getElementById('panelBg');
 
     // Overlay div — covers iframes during swipe so they can't swallow touch events
     var _swOverlay = document.createElement('div');
     _swOverlay.style.cssText = 'position:absolute;inset:0;z-index:9999;display:none;';
     _pi.appendChild(_swOverlay);
 
+    function _swUnbind(){
+      document.removeEventListener('touchmove', _swMove);
+      document.removeEventListener('touchend',  _swEnd);
+      document.removeEventListener('touchcancel', _swCancel);
+    }
+    function _swReset(){
+      _pi.style.transition = ''; _pi.style.transform = '';
+      _pbg.style.transition = ''; _pbg.style.opacity = '';
+    }
+
+    // 回弹：带过渡平滑回到原位
+    function _swSnapBack(){
+      _pi.style.transition  = 'transform .38s cubic-bezier(.22,1,.36,1)';
+      _pbg.style.transition = 'opacity .38s cubic-bezier(.22,1,.36,1)';
+      _pi.style.transform   = 'translateY(0)';
+      _pbg.style.opacity    = '1';
+      setTimeout(function(){ if(!_swTracking && !_swClosing) _swReset(); }, 400);
+    }
+
+    // 关闭：从当前位置顺滑滑出屏幕，再真正关闭面板
+    function _swFlingClose(){
+      _swClosing = true;
+      var h = _pi.getBoundingClientRect().height || window.innerHeight;
+      var remain = Math.max(h - _swDy, 1);
+      var dur = Math.max(160, Math.min(340, remain / Math.max(_swVel, 0.9)));   // 手速越快动画越短
+      _pi.style.transition  = 'transform ' + dur + 'ms cubic-bezier(.3,.7,.4,1)';
+      _pbg.style.transition = 'opacity ' + dur + 'ms linear';
+      _pi.style.transform   = 'translateY(' + (h + 8) + 'px)';
+      _pbg.style.opacity    = '0';
+      setTimeout(function(){
+        _pi.style.transition = 'none';    // 先固定在屏幕外，避免清样式时闪一下
+        _pi.style.transform  = 'translateY(104%)';
+        closePanel();
+        requestAnimationFrame(function(){ requestAnimationFrame(function(){
+          _swReset(); _swClosing = false;
+        }); });
+      }, dur + 20);
+    }
+
     function _swEnd(){
       if(!_swTracking) return;
       _swTracking = false;
       _swOverlay.style.display = 'none';
-      _pi.style.transition = '';
-      document.removeEventListener('touchmove', _swMove);
-      document.removeEventListener('touchend',  _swEnd);
-      document.removeEventListener('touchcancel', _swCancel);
-      if(_swDy > _swThreshold){
-        _pi.style.transform = '';
-        requestAnimationFrame(function(){ closePanel(); });
-      } else {
-        _pi.style.transform = '';
-      }
+      _swUnbind();
+      var h = _pi.getBoundingClientRect().height || window.innerHeight;
+      if(_swDy > h * 0.28 || (_swVel > 0.55 && _swDy > 24)){ _swFlingClose(); }
+      else { _swSnapBack(); }
     }
 
     function _swCancel(){
+      if(!_swTracking) return;
       _swTracking = false;
       _swOverlay.style.display = 'none';
-      _pi.style.transition = '';
-      _pi.style.transform  = '';
-      document.removeEventListener('touchmove', _swMove);
-      document.removeEventListener('touchend',  _swEnd);
-      document.removeEventListener('touchcancel', _swCancel);
+      _swUnbind();
+      _swSnapBack();
     }
 
     function _swMove(e){
       if(!_swTracking || e.touches.length > 1) return;
-      var dy = e.touches[0].clientY - _swSy;
-      if(dy < 0){ _swCancel(); return; }
+      var y  = e.touches[0].clientY;
+      var dy = Math.max(0, y - _swSy);       // 上拉不取消，只是停在原位
       _swDy = dy;
-      _pi.style.transform = 'translateY(' + Math.min(dy * 0.55, 160) + 'px)';
+      var now = e.timeStamp || Date.now();
+      var dt = now - _swLastT;
+      if(dt > 0){ _swVel = 0.8 * _swVel + 0.2 * ((y - _swLastY) / dt); }   // 平滑速度
+      _swLastY = y; _swLastT = now;
+      // 手指 1:1 跟随，没有距离上限
+      _pi.style.transform = 'translateY(' + dy + 'px)';
+      var h = _pi.getBoundingClientRect().height || window.innerHeight;
+      _pbg.style.opacity = String(Math.max(0, 1 - dy / h));
     }
 
     _ph.addEventListener('touchstart', function(e){
-      if(!panelOpen) return;
+      if(!panelOpen || _swClosing) return;
       if(e.touches.length > 1) return;
-      _swSy = e.touches[0].clientY;
+      _swSy = _swLastY = e.touches[0].clientY;
+      _swLastT = e.timeStamp || Date.now(); _swVel = 0;
       _swTracking = true; _swDy = 0;
       _pi.style.transition = 'none';
+      _pbg.style.transition = 'none';
       _swOverlay.style.display = 'block';
       document.addEventListener('touchmove',   _swMove,   {passive:true});
       document.addEventListener('touchend',    _swEnd,    {passive:true});
