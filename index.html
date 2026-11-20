@@ -4882,7 +4882,13 @@ window._sceneState = {
     var _pbg   = document.getElementById('panelBg');
     var _three = document.getElementById('three');
     var SW_LAG = 55;          // 延迟时间常数(ms)：越大抽屉越“拖泥带水”
-    var SW_CAM = 0.22;        // 镜头(3D 画面)跟随比例：抽屉每下移 1px，画面下移 0.22px
+    var SW_CAM = 0.22;        // 镜头(3D 画面)跟随比例（起始斜率）：抽屉每下移 1px，画面下移约 0.22px
+    // 3D 画布平时被 CSS 上移了 5vh（顶部 5vh 在屏幕外）。画面最多只能下移回这 5vh，
+    // 再往下就会露出画布顶边：石头被横向截断、画布外的石头缺失。所以用柔和饱和曲线封顶。
+    function _swCamOff(d){
+      var cap = window.innerHeight * 0.05 * 0.9;      // 留 10% 余量，避免亚像素缝隙
+      return cap * (1 - Math.exp(-d * SW_CAM / cap)); // 起步斜率 = SW_CAM，逐渐趋近 cap，不会硬停
+    }
 
     // Overlay div — covers iframes during swipe so they can't swallow touch events
     var _swOverlay = document.createElement('div');
@@ -4895,7 +4901,7 @@ window._sceneState = {
     function _swApply(d){
       _pi.style.transform = 'translateY(' + d + 'px)';
       _pbg.style.opacity  = String(Math.max(0, 1 - d / _swH()));
-      if(_three) _three.style.transform = 'translateY(calc(-5vh + ' + (d * SW_CAM) + 'px))';
+      if(_three) _three.style.transform = 'translateY(calc(-5vh + ' + _swCamOff(d) + 'px))';
     }
 
     // 延迟追随：每帧让 _swCur 以指数方式靠近手指位置（与帧率无关）
@@ -4946,7 +4952,7 @@ window._sceneState = {
       if(_three) _three.style.transition = 'transform ' + dur + 'ms cubic-bezier(.3,.7,.4,1)';
       _pi.style.transform = 'translateY(' + (h + 8) + 'px)';
       _pbg.style.opacity  = '0';
-      if(_three) _three.style.transform = 'translateY(calc(-5vh + ' + (h * SW_CAM) + 'px))';
+      if(_three) _three.style.transform = 'translateY(calc(-5vh + ' + _swCamOff(h) + 'px))';
       setTimeout(function(){
         _pi.style.transition = 'none';    // 先固定在屏幕外，避免清样式时闪一下
         _pi.style.transform  = 'translateY(104%)';
