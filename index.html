@@ -1640,7 +1640,7 @@ window._sceneState = {
 
     // ── Panel drift: lerp toward target (set by Three.js section on panel open/close) ──
     var ss = window._sceneState;
-    ss.panelDrift += (ss.panelDriftTarget - ss.panelDrift) * (window._swFast ? 0.14 : 0.035);
+    ss.panelDrift += (ss.panelDriftTarget - ss.panelDrift) * (window._swFast ? 0.07 : 0.035);
     // Stars shift left at 40% of the Three.js -6vw shift → depth illusion
     var driftPx = -ss.panelDrift * W * 0.035 * 0.40;
 
@@ -4936,21 +4936,21 @@ window._sceneState = {
     // 回弹：从当前位置带过渡平滑回到原位，镜头一起回位
     function _swSnapBack(){
       _swStopRaf();
-      window._swPull = 0; _swFastFor(900);              // 镜头快速回到聚焦位
+      window._swPull = 0; _swFastFor(1300);              // 镜头快速回到聚焦位
       _pi.style.transition  = 'transform .36s cubic-bezier(.22,1,.36,1)';
       _pbg.style.transition = 'opacity .36s cubic-bezier(.22,1,.36,1)';
-      if(_three) _three.style.transition = 'transform .36s cubic-bezier(.22,1,.36,1)';
+      if(_three) _three.style.transition = 'transform .6s cubic-bezier(.25,.8,.25,1)';
       _pi.style.transform = 'translateY(0)';
       _pbg.style.opacity  = '1';
       if(_three) _three.style.transform = 'translateY(-5vh)';
       _swCur = 0; _swDy = 0;
-      setTimeout(function(){ if(!_swTracking && !_swClosing) _swReset(); }, 400);
+      setTimeout(function(){ if(!_swTracking && !_swClosing) _swReset(); }, 650);
     }
 
     // 关闭：从当前位置顺滑滑出屏幕，再真正关闭面板
     function _swFlingClose(){
       _swClosing = true;
-      window._swPull = 1; _swFastFor(1200);             // 镜头立即开始快速回到全景
+      window._swPull = 1; _swFastFor(1600);             // 镜头立即开始快速回到全景
       _swStopRaf();
       var h = _swH();
       var remain = Math.max(h - _swCur, 1);
@@ -4966,8 +4966,8 @@ window._sceneState = {
         _pi.style.transform  = 'translateY(104%)';
         closePanel();                     // 3D 画面由 CSS 从当前位置自然过渡回默认位置
         // 画布回默认位置：用短过渡(0.4s)，而不是 CSS 默认的 1.6s
-        if(_three){ _three.style.transition = 'transform .4s cubic-bezier(.22,1,.36,1), filter 1.6s cubic-bezier(.4,0,.2,1)'; _three.style.transform = ''; }
-        setTimeout(function(){ if(_three && !panelOpen) _three.style.transition = ''; }, 460);
+        if(_three){ _three.style.transition = 'transform .9s cubic-bezier(.25,.8,.25,1), filter 1.6s cubic-bezier(.4,0,.2,1)'; _three.style.transform = ''; }
+        setTimeout(function(){ if(_three && !panelOpen) _three.style.transition = ''; }, 960);
         requestAnimationFrame(function(){ requestAnimationFrame(function(){
           _pi.style.transition = ''; _pi.style.transform = '';
           _pbg.style.transition = ''; _pbg.style.opacity = '';
@@ -4978,7 +4978,7 @@ window._sceneState = {
 
     function _swEnd(){
       if(!_swTracking) return;
-      _swTracking = false;
+      _swTracking = false; window._swDrag = false;
       _swOverlay.style.display = 'none';
       _swUnbind();
       var h = _swH();
@@ -4989,7 +4989,7 @@ window._sceneState = {
 
     function _swCancel(){
       if(!_swTracking) return;
-      _swTracking = false;
+      _swTracking = false; window._swDrag = false;
       _swOverlay.style.display = 'none';
       _swUnbind();
       _swSnapBack();
@@ -5012,7 +5012,7 @@ window._sceneState = {
       _swStopRaf();
       _swSy = _swLastY = e.touches[0].clientY;
       _swLastT = e.timeStamp || Date.now(); _swVel = 0;
-      _swTracking = true; _swDy = 0; _swCur = 0;
+      _swTracking = true; window._swDrag = true; _swDy = 0; _swCur = 0;
       _pi.style.transition = 'none';
       _pbg.style.transition = 'none';
       if(_three) _three.style.transition = 'none';
@@ -7027,7 +7027,8 @@ resetIdleTimer();
     var _fo = _fg ? 4.0 : 4.8;                       // 进入稍慢、退出稍快
     // 手机下拉抽屉：镜头随手指逐步回位(_swPull 0→1)，并用更硬的弹簧，跟手且回位快
     var _swP = window._swPull || 0;
-    if(_swP > 0 || window._swFast){ _fo = 9.5; }
+    if(window._swDrag && _swP > 0){ _fo = 9.5; }       // 手指拖动中：硬弹簧，镜头紧跟手指
+    else if(window._swFast){ _fo = 5.8; }             // 松手之后：软一些，回位更从容、有电影感
     var _ft = _fg * (1 - _swP);                       // 弹簧目标：1=聚焦在石头，0=回到全景
     // 掉帧保护：单帧卡顿(dt 很大)时镜头不再“瞬移”一大截，最多按 30fps 的步长推进；
     // 正常帧(dt<=33ms)完全等价于原实现，不改变任何正常帧的观感
