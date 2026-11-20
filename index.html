@@ -1640,7 +1640,7 @@ window._sceneState = {
 
     // ── Panel drift: lerp toward target (set by Three.js section on panel open/close) ──
     var ss = window._sceneState;
-    ss.panelDrift += (ss.panelDriftTarget - ss.panelDrift) * 0.035;
+    ss.panelDrift += (ss.panelDriftTarget - ss.panelDrift) * (window._swFast ? 0.14 : 0.035);
     // Stars shift left at 40% of the Three.js -6vw shift → depth illusion
     var driftPx = -ss.panelDrift * W * 0.035 * 0.40;
 
@@ -4881,7 +4881,7 @@ window._sceneState = {
     var _swClosing = false, _swRaf = 0, _swTickT = 0;
     var _pbg   = document.getElementById('panelBg');
     var _three = document.getElementById('three');
-    var SW_LAG = 55;          // 延迟时间常数(ms)：越大抽屉越“拖泥带水”
+    var SW_LAG = 26;          // 延迟时间常数(ms)：越大抽屉越“拖泥带水”
     var SW_CAM = 0.22;        // 镜头(3D 画面)跟随比例（起始斜率）：抽屉每下移 1px，画面下移约 0.22px
     // 3D 画布平时被 CSS 上移了 5vh（顶部 5vh 在屏幕外）。画面最多只能下移回这 5vh，
     // 再往下就会露出画布顶边：石头被横向截断、画布外的石头缺失。所以用柔和饱和曲线封顶。
@@ -4901,6 +4901,7 @@ window._sceneState = {
     function _swApply(d){
       _pi.style.transform = 'translateY(' + d + 'px)';
       _pbg.style.opacity  = String(Math.max(0, 1 - d / _swH()));
+      window._swPull = Math.min(1, d / (_swH() * 0.4));   // 镜头聚焦随下拉距离逐步回位
       if(_three) _three.style.transform = 'translateY(calc(-5vh + ' + _swCamOff(d) + 'px))';
     }
 
@@ -4921,6 +4922,11 @@ window._sceneState = {
       document.removeEventListener('touchend',  _swEnd);
       document.removeEventListener('touchcancel', _swCancel);
     }
+    var _swFastTmr = 0;
+    function _swFastFor(ms){
+      window._swFast = true; clearTimeout(_swFastTmr);
+      _swFastTmr = setTimeout(function(){ window._swFast = false; }, ms);
+    }
     function _swReset(){
       _pi.style.transition = ''; _pi.style.transform = '';
       _pbg.style.transition = ''; _pbg.style.opacity = '';
@@ -4930,19 +4936,21 @@ window._sceneState = {
     // 回弹：从当前位置带过渡平滑回到原位，镜头一起回位
     function _swSnapBack(){
       _swStopRaf();
-      _pi.style.transition  = 'transform .45s cubic-bezier(.22,1,.36,1)';
-      _pbg.style.transition = 'opacity .45s cubic-bezier(.22,1,.36,1)';
-      if(_three) _three.style.transition = 'transform .6s cubic-bezier(.22,1,.36,1)';
+      window._swPull = 0; _swFastFor(900);              // 镜头快速回到聚焦位
+      _pi.style.transition  = 'transform .36s cubic-bezier(.22,1,.36,1)';
+      _pbg.style.transition = 'opacity .36s cubic-bezier(.22,1,.36,1)';
+      if(_three) _three.style.transition = 'transform .36s cubic-bezier(.22,1,.36,1)';
       _pi.style.transform = 'translateY(0)';
       _pbg.style.opacity  = '1';
       if(_three) _three.style.transform = 'translateY(-5vh)';
       _swCur = 0; _swDy = 0;
-      setTimeout(function(){ if(!_swTracking && !_swClosing) _swReset(); }, 620);
+      setTimeout(function(){ if(!_swTracking && !_swClosing) _swReset(); }, 400);
     }
 
     // 关闭：从当前位置顺滑滑出屏幕，再真正关闭面板
     function _swFlingClose(){
       _swClosing = true;
+      window._swPull = 1; _swFastFor(1200);             // 镜头立即开始快速回到全景
       _swStopRaf();
       var h = _swH();
       var remain = Math.max(h - _swCur, 1);
@@ -4957,9 +4965,13 @@ window._sceneState = {
         _pi.style.transition = 'none';    // 先固定在屏幕外，避免清样式时闪一下
         _pi.style.transform  = 'translateY(104%)';
         closePanel();                     // 3D 画面由 CSS 从当前位置自然过渡回默认位置
-        if(_three){ _three.style.transition = ''; _three.style.transform = ''; }
+        // 画布回默认位置：用短过渡(0.4s)，而不是 CSS 默认的 1.6s
+        if(_three){ _three.style.transition = 'transform .4s cubic-bezier(.22,1,.36,1), filter 1.6s cubic-bezier(.4,0,.2,1)'; _three.style.transform = ''; }
+        setTimeout(function(){ if(_three && !panelOpen) _three.style.transition = ''; }, 460);
         requestAnimationFrame(function(){ requestAnimationFrame(function(){
-          _swReset(); _swClosing = false; _swCur = 0; _swDy = 0;
+          _pi.style.transition = ''; _pi.style.transform = '';
+          _pbg.style.transition = ''; _pbg.style.opacity = '';
+          _swClosing = false; _swCur = 0; _swDy = 0; window._swPull = 0;
         }); });
       }, dur + 20);
     }
@@ -7013,6 +7025,10 @@ resetIdleTimer();
     // ── Focus spring ──
     var _fg = (panelOpen && focusGoal === 1 && focusCr) ? 1 : 0;
     var _fo = _fg ? 4.0 : 4.8;                       // 进入稍慢、退出稍快
+    // 手机下拉抽屉：镜头随手指逐步回位(_swPull 0→1)，并用更硬的弹簧，跟手且回位快
+    var _swP = window._swPull || 0;
+    if(_swP > 0 || window._swFast){ _fo = 9.5; }
+    var _ft = _fg * (1 - _swP);                       // 弹簧目标：1=聚焦在石头，0=回到全景
     // 掉帧保护：单帧卡顿(dt 很大)时镜头不再“瞬移”一大截，最多按 30fps 的步长推进；
     // 正常帧(dt<=33ms)完全等价于原实现，不改变任何正常帧的观感
     // [perf] 抗尖峰：单帧 dt 超过近期均值 2.2 倍时按均值推进，镜头不再因一次卡顿而“瞬移/顿挫”；
@@ -7020,11 +7036,11 @@ resetIdleTimer();
     var _dtc = Math.min(_dt, _dtSm * 2.2 + 0.002);
     _dtSm += (_dtc - _dtSm) * 0.1;
     var _fdt = Math.min(_dtc, 1/30);
-    focusVel += (-_fo*_fo*(focusW - _fg) - 2*_fo*focusVel) * _fdt;
+    focusVel += (-_fo*_fo*(focusW - _ft) - 2*_fo*focusVel) * _fdt;
     focusW   += focusVel * _fdt;
     if(focusW < 0){ focusW = 0; focusVel = 0; }
     if(focusW > 1.02) focusW = 1.02;
-    if(!_fg && focusW < 0.0004 && Math.abs(focusVel) < 0.001){ focusW = 0; focusVel = 0; }
+    if(!_ft && focusW < 0.0004 && Math.abs(focusVel) < 0.001){ focusW = 0; focusVel = 0; }
     var _fc = Math.min(1, focusW);
     focusE = _fc*_fc*(3 - 2*_fc);                     // smoothstep
 
