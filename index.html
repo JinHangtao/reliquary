@@ -934,6 +934,9 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 .ident-trigger{display:block;background:none;border:0;padding:0;margin:0;text-align:left;font:inherit;color:inherit;cursor:inherit;pointer-events:auto}
 #ident:not(.in) .ident-trigger{pointer-events:none}
 .ident-trigger .ident-name,.ident-trigger .ident-sub{display:block}
+/* ── language settle: glint along the chip underline (the space-warp itself lives in the composite shader) ── */
+.lang-glint{position:absolute;left:0;right:0;bottom:0;height:1px;overflow:hidden;pointer-events:none}
+.lang-glint i{position:absolute;top:0;left:0;width:55%;height:100%;opacity:0;background:linear-gradient(90deg,rgba(232,200,128,0),rgba(232,200,128,.9),rgba(232,200,128,0))}
 .ident-lang{position:relative;z-index:3;display:inline-flex;align-items:center;gap:7px;margin-left:16px;padding:3px 0 4px;vertical-align:middle;font-size:1.15em;letter-spacing:.1em;color:var(--gold-d);transition:color .45s var(--ease-out)}
 .ident-lang::before{content:"";position:absolute;left:-9px;top:50%;width:1px;height:10px;margin-top:-5px;background:currentColor;opacity:.35;transition:opacity .4s ease}
 .ident-lang::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,var(--gold),rgba(212,168,90,0));transform:scaleX(0);transform-origin:left;transition:transform .8s var(--ease-out)}
@@ -1643,8 +1646,10 @@ window._sceneState = {
 
     // ── Shock waves: advance radius, cull dead ones ──
     var waves = ss.shockWaves;
+    // speed 的单位仍是「60Hz 下每帧像素」，但按真实经过的时间换算：60Hz 下 _wf≈1（手感不变），120Hz 下每帧 ≈0.5，低帧率下自动补足
+    var _wf = _dtMs / (1000/60);
     for(var wi = waves.length-1; wi >= 0; wi--){
-      waves[wi].radius += 14; // px per frame — fast enough to feel snappy
+      waves[wi].radius += (waves[wi].speed || 14) * _wf; // px per 60Hz-frame, scaled by real dt（语言涟漪自带更慢的 speed）
       if(waves[wi].radius > waves[wi].maxRadius) waves.splice(wi, 1);
     }
 
@@ -3586,6 +3591,7 @@ window._sceneState = {
           maxRadius: Math.max(window.innerWidth, window.innerHeight) * 0.85,
           strength: 1.0,
         });
+        if(window._crystalAfterWave) window._crystalAfterWave(sp.x, sp.y);
         // Afterglow residual
         var _gp = window._sceneState.glowPulses;
         if(_gp.length >= 3) _gp.shift();
@@ -3652,6 +3658,20 @@ window._sceneState = {
     }
   });
 
+  // ── 点击石头后的「余波」：主波之后 0.3~0.6s 再放一圈很浅的折射环（无色散、更弱更慢更小），增加层次 ──
+  // 与语言切换的余波同一套手法；着色器只取最新两圈，主波 + 余波正好占满两个槽位。
+  window._crystalAfterWave = function(x, y){
+    try{
+      if(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      var ss = window._sceneState; if(!ss || !ss.shockWaves) return;
+      var big = Math.max(window.innerWidth, window.innerHeight);
+      var jit = 0.92 + Math.random() * 0.16;
+      setTimeout(function(){
+        ss.shockWaves.push({ x:x, y:y, radius:0, maxRadius:big * 0.5, strength:0.36 + Math.random() * 0.16, speed:6.5 * jit, ca:0 });   // 强度 0.36~0.52 随机：每次余波深浅不一，保留「不确定」的感觉
+      }, 300 + Math.random() * 300);   // 0.3~0.6s：更像主波的「尾巴」，不会等面板展开后才孤零零冒出来
+    }catch(_e){}
+  };
+
   // ── Raycasting ──
   // All crystals can be clicked (including corners).
   // Hover effects (scale, glow) only apply to non-corner crystals.
@@ -3688,6 +3708,7 @@ window._sceneState = {
         maxRadius: Math.max(W, H) * 0.85,
         strength: 1.0,
       });
+      window._crystalAfterWave(sp.x, sp.y);
       var _gp = window._sceneState.glowPulses;
       if(_gp.length >= 3) _gp.shift();
       _gp.push({ x: sp.x, y: sp.y, alpha: 0.22 });
@@ -4002,6 +4023,7 @@ window._sceneState = {
           maxRadius: Math.max(W, H) * 0.85,
           strength: 1.0,
         });
+        window._crystalAfterWave(_tsx, _tsy);
         // ── Haptic: short crisp pulse matching crystal click feel ──
         if(navigator.vibrate) navigator.vibrate([18, 0, 8]);
         setCamFocus(hitCr);
@@ -6450,6 +6472,7 @@ resetIdleTimer();
       uZoomCenter:{ value: new THREE.Vector2(0.5,0.5) },// 缩放中心：被聚焦晶体的屏幕 UV
       // 点击涟漪（最多 2 圈）：xy = 中心 UV，z = 半径（以屏幕高度为单位），w = 强度
       uRip:       { value: [ new THREE.Vector4(0,0,0,0), new THREE.Vector4(0,0,0,0) ] },
+      uRipCA:     { value: new THREE.Vector2(1,1) },   // 每圈涟漪的色散系数：1 = 点击涟漪（带色散），0 = 语言涟漪（无色，纯折射）
     },
     vertexShader: _postVS,
     fragmentShader: `
@@ -6464,6 +6487,7 @@ resetIdleTimer();
       uniform float     uZoom;
       uniform vec2      uZoomCenter;
       uniform vec4      uRip[2];
+      uniform vec2      uRipCA;
       varying vec2      vUv;
 
       // ── 运动驱动色差：静止只留极淡底噪，运动越快分离越大 ──
@@ -6589,7 +6613,7 @@ resetIdleTimer();
             vec2  dir  = (r > 1e-4) ? d / r : vec2(0.0);
             vec2  push = dir / asp * (-x * ring) * rp.w * 0.030;
             suv   += push;
-            ripCA += push * 0.55;
+            ripCA += push * 0.55 * ((i == 0) ? uRipCA.x : uRipCA.y);
           }
         }
 
@@ -7754,6 +7778,7 @@ if(idleDriftSpeed > 0.000005){
       var _fa = Math.pow(1 - _pg, 1.6);                             // 越扩散越弱
       _v4.set((_w.x + CANVAS_OVERHANG*0.5) / CW, 1 - _w.y / H, _w.radius / H,
               _w.strength * _in * _fa * _caReduce);
+      _matComposite.uniforms.uRipCA.value.setComponent(_ri, _w.ca === 0 ? 0 : 1);
     }
 
     // ── [perf] 首次拖动预热（拆成两帧：先 WebGL，后背景 2D）──
@@ -11016,6 +11041,34 @@ document.addEventListener('keydown', e => {
     }, 160);
   }
 
+  // 切换完成后的「空间回应」：面板落回 chip 时，画面从 chip 处被折射扭动开一圈（无色），下划线上掠过一道微光。
+  // 只在真的换了语言时触发。
+  function langSettle(){
+    var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if(reduce || !curTag || !document.body.animate) return;
+    var chip = curTag.parentNode, C = chip.getBoundingClientRect();
+    if(!C.width) return;
+    var x = C.left + C.width * 0.5, y = C.top + C.height * 0.5;
+    var gl = chip.querySelector('.lang-glint i');
+    if(gl) gl.animate(
+      [{transform:'translateX(-100%)', opacity:0},{opacity:1, offset:.28},{transform:'translateX(190%)', opacity:0}],
+      {duration:950, easing:'cubic-bezier(.22,.7,.2,1)'});
+    // 空间折射：复用场景里「点击涟漪」的折射扭曲环（合成着色器里对画面做 UV 偏移），但这里
+    // 无色散（ca:0）、更慢更软；主纹之后跟一道更弱更慢的余波，像水面真实的衰减。
+    var ss = window._sceneState;
+    // 冷却 ~900ms：着色器只取最新两圈，涟漪还在跑时再切语言，只换文字、不再发波，避免上一圈主纹被突然挤掉
+    var _nowW = performance.now();
+    if(ss && ss.shockWaves && (_nowW - (langSettle._lastWave || -1e9)) >= 900){
+      langSettle._lastWave = _nowW;
+      var big = Math.max(window.innerWidth, window.innerHeight);
+      var jit = 0.92 + Math.random() * 0.16;           // 速度带一点随机，连切几次不会完全一样
+      ss.shockWaves.push({ x:x, y:y, radius:0, maxRadius:big * 0.62, strength:0.75, speed:7.5 * jit, ca:0 });
+      setTimeout(function(){
+        ss.shockWaves.push({ x:x, y:y, radius:0, maxRadius:big * 0.5, strength:0.3, speed:6.2 * jit, ca:0 });
+      }, 230);
+    }
+  }
+
   var busyT = 0;
   function isOpen(){ return menu.classList.contains('open'); }
   function items(){ return Array.prototype.slice.call(menu.querySelectorAll('.lang-item')); }
@@ -11076,6 +11129,7 @@ document.addEventListener('keydown', e => {
     head.innerHTML = '<span class="lang-cap" data-i18n="lang.cap">Language</span>';
     inner.appendChild(spot); inner.appendChild(glow); inner.appendChild(head);
     menu.appendChild(inner);
+    (function(){ var il = curTag.parentNode, g = document.createElement('span'); g.className = 'lang-glint'; g.setAttribute('aria-hidden','true'); g.appendChild(document.createElement('i')); il.appendChild(g); })();
 
     LANGS.forEach(function(L, idx){
       var b = document.createElement('button');
@@ -11086,11 +11140,13 @@ document.addEventListener('keydown', e => {
         '<svg class="lang-ck" viewBox="0 0 12 9" aria-hidden="true"><path pathLength="1" d="M1 4.5 4.2 7.5 11 1"/></svg>';
       b.addEventListener('click', function(){
         if(menu.classList.contains('picking')) return;
+        var changed = (L.c !== cur);
         menu.classList.add('picking');            // let the check mark draw before the panel folds back into the chip
         moveGlow(b);
         // 点击这一帧只做轻量的高亮；文字替换 / 面板重绘放到下一帧之后，避免和菜单动画挤在同一帧
         requestAnimationFrame(function(){ requestAnimationFrame(function(){ set(L.c); }); });
         setTimeout(function(){ close(true); }, 520);
+        if(changed) setTimeout(langSettle, 520 + 300);   // 面板大半落回 chip、标签正在落定的那一刻
       });
       b.addEventListener('mouseenter', function(){ moveGlow(b); });
       b.addEventListener('focus', function(){ moveGlow(b); });
