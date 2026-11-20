@@ -4875,15 +4875,40 @@ window._sceneState = {
   if(isMobile){
     var _pi     = document.getElementById('panelInner');
     var _ph     = document.querySelector('.panel-head');
-    var _swSy   = 0, _swTracking = false, _swDy = 0;
-    var _swLastY = 0, _swLastT = 0, _swVel = 0;   // px/ms, 向下为正
-    var _swClosing = false;
-    var _pbg = document.getElementById('panelBg');
+    var _swSy   = 0, _swTracking = false, _swDy = 0;   // _swDy = 手指目标位移
+    var _swCur  = 0;                                    // _swCur = 抽屉实际位移（追随手指，带延迟）
+    var _swLastY = 0, _swLastT = 0, _swVel = 0;         // px/ms, 向下为正
+    var _swClosing = false, _swRaf = 0, _swTickT = 0;
+    var _pbg   = document.getElementById('panelBg');
+    var _three = document.getElementById('three');
+    var SW_LAG = 55;          // 延迟时间常数(ms)：越大抽屉越“拖泥带水”
+    var SW_CAM = 0.22;        // 镜头(3D 画面)跟随比例：抽屉每下移 1px，画面下移 0.22px
 
     // Overlay div — covers iframes during swipe so they can't swallow touch events
     var _swOverlay = document.createElement('div');
     _swOverlay.style.cssText = 'position:absolute;inset:0;z-index:9999;display:none;';
     _pi.appendChild(_swOverlay);
+
+    function _swH(){ return _pi.getBoundingClientRect().height || window.innerHeight; }
+
+    // 把位移 d 同时应用到 抽屉 / 背景遮罩 / 3D 镜头
+    function _swApply(d){
+      _pi.style.transform = 'translateY(' + d + 'px)';
+      _pbg.style.opacity  = String(Math.max(0, 1 - d / _swH()));
+      if(_three) _three.style.transform = 'translateY(calc(-5vh + ' + (d * SW_CAM) + 'px))';
+    }
+
+    // 延迟追随：每帧让 _swCur 以指数方式靠近手指位置（与帧率无关）
+    function _swTick(t){
+      var dt = Math.min(48, t - (_swTickT || t)); _swTickT = t;
+      var k = 1 - Math.exp(-dt / SW_LAG);
+      _swCur += (_swDy - _swCur) * k;
+      if(Math.abs(_swDy - _swCur) < 0.3) _swCur = _swDy;
+      _swApply(_swCur);
+      if(_swTracking || _swCur !== _swDy){ _swRaf = requestAnimationFrame(_swTick); }
+      else { _swRaf = 0; _swTickT = 0; }
+    }
+    function _swStopRaf(){ if(_swRaf){ cancelAnimationFrame(_swRaf); _swRaf = 0; } _swTickT = 0; }
 
     function _swUnbind(){
       document.removeEventListener('touchmove', _swMove);
@@ -4893,33 +4918,42 @@ window._sceneState = {
     function _swReset(){
       _pi.style.transition = ''; _pi.style.transform = '';
       _pbg.style.transition = ''; _pbg.style.opacity = '';
+      if(_three){ _three.style.transition = ''; _three.style.transform = ''; }
     }
 
-    // 回弹：带过渡平滑回到原位
+    // 回弹：从当前位置带过渡平滑回到原位，镜头一起回位
     function _swSnapBack(){
-      _pi.style.transition  = 'transform .38s cubic-bezier(.22,1,.36,1)';
-      _pbg.style.transition = 'opacity .38s cubic-bezier(.22,1,.36,1)';
-      _pi.style.transform   = 'translateY(0)';
-      _pbg.style.opacity    = '1';
-      setTimeout(function(){ if(!_swTracking && !_swClosing) _swReset(); }, 400);
+      _swStopRaf();
+      _pi.style.transition  = 'transform .45s cubic-bezier(.22,1,.36,1)';
+      _pbg.style.transition = 'opacity .45s cubic-bezier(.22,1,.36,1)';
+      if(_three) _three.style.transition = 'transform .6s cubic-bezier(.22,1,.36,1)';
+      _pi.style.transform = 'translateY(0)';
+      _pbg.style.opacity  = '1';
+      if(_three) _three.style.transform = 'translateY(-5vh)';
+      _swCur = 0; _swDy = 0;
+      setTimeout(function(){ if(!_swTracking && !_swClosing) _swReset(); }, 620);
     }
 
     // 关闭：从当前位置顺滑滑出屏幕，再真正关闭面板
     function _swFlingClose(){
       _swClosing = true;
-      var h = _pi.getBoundingClientRect().height || window.innerHeight;
-      var remain = Math.max(h - _swDy, 1);
-      var dur = Math.max(160, Math.min(340, remain / Math.max(_swVel, 0.9)));   // 手速越快动画越短
+      _swStopRaf();
+      var h = _swH();
+      var remain = Math.max(h - _swCur, 1);
+      var dur = Math.max(180, Math.min(380, remain / Math.max(_swVel, 0.9)));   // 手速越快动画越短
       _pi.style.transition  = 'transform ' + dur + 'ms cubic-bezier(.3,.7,.4,1)';
       _pbg.style.transition = 'opacity ' + dur + 'ms linear';
-      _pi.style.transform   = 'translateY(' + (h + 8) + 'px)';
-      _pbg.style.opacity    = '0';
+      if(_three) _three.style.transition = 'transform ' + dur + 'ms cubic-bezier(.3,.7,.4,1)';
+      _pi.style.transform = 'translateY(' + (h + 8) + 'px)';
+      _pbg.style.opacity  = '0';
+      if(_three) _three.style.transform = 'translateY(calc(-5vh + ' + (h * SW_CAM) + 'px))';
       setTimeout(function(){
         _pi.style.transition = 'none';    // 先固定在屏幕外，避免清样式时闪一下
         _pi.style.transform  = 'translateY(104%)';
-        closePanel();
+        closePanel();                     // 3D 画面由 CSS 从当前位置自然过渡回默认位置
+        if(_three){ _three.style.transition = ''; _three.style.transform = ''; }
         requestAnimationFrame(function(){ requestAnimationFrame(function(){
-          _swReset(); _swClosing = false;
+          _swReset(); _swClosing = false; _swCur = 0; _swDy = 0;
         }); });
       }, dur + 20);
     }
@@ -4929,7 +4963,8 @@ window._sceneState = {
       _swTracking = false;
       _swOverlay.style.display = 'none';
       _swUnbind();
-      var h = _pi.getBoundingClientRect().height || window.innerHeight;
+      var h = _swH();
+      // 用手指目标位移判断（而不是被延迟的位置），响应更准
       if(_swDy > h * 0.28 || (_swVel > 0.55 && _swDy > 24)){ _swFlingClose(); }
       else { _swSnapBack(); }
     }
@@ -4944,27 +4979,25 @@ window._sceneState = {
 
     function _swMove(e){
       if(!_swTracking || e.touches.length > 1) return;
-      var y  = e.touches[0].clientY;
-      var dy = Math.max(0, y - _swSy);       // 上拉不取消，只是停在原位
-      _swDy = dy;
+      var y = e.touches[0].clientY;
+      _swDy = Math.max(0, y - _swSy);        // 上拉不取消，只是停在原位
       var now = e.timeStamp || Date.now();
       var dt = now - _swLastT;
       if(dt > 0){ _swVel = 0.8 * _swVel + 0.2 * ((y - _swLastY) / dt); }   // 平滑速度
       _swLastY = y; _swLastT = now;
-      // 手指 1:1 跟随，没有距离上限
-      _pi.style.transform = 'translateY(' + dy + 'px)';
-      var h = _pi.getBoundingClientRect().height || window.innerHeight;
-      _pbg.style.opacity = String(Math.max(0, 1 - dy / h));
+      if(!_swRaf){ _swRaf = requestAnimationFrame(_swTick); }
     }
 
     _ph.addEventListener('touchstart', function(e){
       if(!panelOpen || _swClosing) return;
       if(e.touches.length > 1) return;
+      _swStopRaf();
       _swSy = _swLastY = e.touches[0].clientY;
       _swLastT = e.timeStamp || Date.now(); _swVel = 0;
-      _swTracking = true; _swDy = 0;
+      _swTracking = true; _swDy = 0; _swCur = 0;
       _pi.style.transition = 'none';
       _pbg.style.transition = 'none';
+      if(_three) _three.style.transition = 'none';
       _swOverlay.style.display = 'block';
       document.addEventListener('touchmove',   _swMove,   {passive:true});
       document.addEventListener('touchend',    _swEnd,    {passive:true});
