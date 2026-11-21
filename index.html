@@ -5649,7 +5649,8 @@ window._sceneState = {
     var ax = 0, ay = 0, az = 0;
 
     // 3) 辐射压 / 星风：沿主流的恒定微力
-    ax += _flow.x*4*inertia; ay += _flow.y*4*inertia; az += _flow.z*4*inertia*0.6;
+    var bz = 1 + 0.6*Math.sin(tt*0.21 + S.ph0)*Math.sin(tt*0.13 + S.ph1 + 1);   // 微风忽强忽弱
+    ax += _flow.x*6*bz*inertia; ay += _flow.y*6*bz*inertia; az += _flow.z*6*bz*inertia*0.9;
     // 6) 低频湍流
     ax += Math.sin(tt*0.37 + S.ph0)*0.8*inertia;
     ay += Math.sin(tt*0.29 + S.ph1)*0.8*inertia;
@@ -5661,17 +5662,17 @@ window._sceneState = {
       var q = ((p.x*w.dir.x + p.y*w.dir.y + p.z*w.dir.z) - w.front) / w.width;
       if(q > -3 && q < 3){
         var env = q > 0 ? Math.exp(-q*q*3.0) : Math.exp(-q*q*0.6);
-        var ts  = 2.0 + cr.scale/25;
-        var vg  = w.wind * 60 * 0.55;
+        var ts  = 1.4 + cr.scale/40;
+        var vg  = w.wind * 60 * 0.9;
         ax += (w.dir.x*vg - S.vx) / ts * env;
         ay += (w.dir.y*vg - S.vy) / ts * env;
-        az += (w.dir.z*vg - S.vz) / ts * env * 0.6;
+        az += (w.dir.z*vg - S.vz) / ts * env * 0.95;
         // τ = r_cp × F ；角惯量 ∝ s²
         var il = (40 / cr.scale); il *= il;
         var tx = S.lever.y*w.dir.z - S.lever.z*w.dir.y;
         var ty = S.lever.z*w.dir.x - S.lever.x*w.dir.z;
         var tz = S.lever.x*w.dir.y - S.lever.y*w.dir.x;
-        var kt = 0.16 * env * il * (w.wind/1.1);
+        var kt = 0.28 * env * il * (w.wind/1.1);
         S.wx += (tx + _gauss()*0.15) * kt * dt;
         S.wy += (ty + _gauss()*0.15) * kt * dt;
         S.wz += (tz + _gauss()*0.15) * kt * dt;
@@ -5713,7 +5714,7 @@ window._sceneState = {
     S.vx += ax*dt; S.vy += ay*dt; S.vz += az*dt;
     S.ox += S.vx*dt; S.oy += S.vy*dt; S.oz += S.vz*dt;
     // 软上限：不管怎么推，都不会离开入口位置太远
-    var cap = cr.isCorner ? 14 : 30, ol = Math.sqrt(S.ox*S.ox + S.oy*S.oy + S.oz*S.oz);
+    var cap = cr.isCorner ? 14 : 46, ol = Math.sqrt(S.ox*S.ox + S.oy*S.oy + S.oz*S.oz);
     if(ol > cap){ var g = cap/ol; S.ox *= g; S.oy *= g; S.oz *= g; S.vx *= 0.92; S.vy *= 0.92; S.vz *= 0.92; }
 
     // 轴向：额外自转经内耗衰减，朝向因此“留”在新位置；YORP 让倾角缓慢漂移
@@ -5727,7 +5728,56 @@ window._sceneState = {
     _ccAx.set(_flow.x, _flow.y, _flow.z);
     cr.group.rotateOnWorldAxis(_ccAx, S.yorp*dt*calm);
 
-    _ccOut.x = S.ox*calm; _ccOut.y = S.oy*calm; _ccOut.z = S.oz*0.6*calm;
+    // ── 区域漂移：真三维 ──────────────────────────────────────────────
+    // X / Y / Z 三个轴各自有一对互不公度的频率和各自的相位，所以石头走的是一条真正的 3D 李萨如曲线，
+    // 不会只沿一个轴来回。幅度取「到最近邻居距离」的一部分；相位与锚点 (x,y,z) 相关，邻近的石头漂得相似。
+    // 位移同时叠加：下风向的缓慢「倾斜」（跟随主流 _flow，带惯性）+ 全体共有的极慢呼吸。
+    // 滚转用拖曳力矩 τ = r_cp × v（同一根 lever），所以转动方向由漂移方向和石头自身的不对称性决定。
+    var Wd = cr._wd;
+    if(!Wd){
+      var i0 = crystals.indexOf(cr), a0 = positions2D[i0], gap = 1e9;
+      for(var j = 2; j < positions2D.length; j++){
+        if(j === i0) continue;
+        var gx = a0[0]-positions2D[j][0], gy = a0[1]-positions2D[j][1], gz = (a0[2]-positions2D[j][2])*0.5;
+        var dd = Math.sqrt(gx*gx + gy*gy + gz*gz);
+        if(dd < gap) gap = dd;
+      }
+      var mk = (isMobile ? 0.55 : 1) * (cr.isCorner ? 0.25 : 1);
+      var base = a0[0]*0.006 + a0[1]*0.004 + a0[2]*0.01, fr = [], ph = [];
+      for(var q2 = 0; q2 < 6; q2++){
+        fr.push((q2 % 2 ? 0.05 + Math.random()*0.035 : 0.075 + Math.random()*0.06) * (q2 >= 4 ? 0.85 : 1));
+        ph.push(base*(1 + 0.37*q2) + q2*2.1 + Math.random()*0.8);
+      }
+      Wd = cr._wd = {
+        ax: Math.min(42, gap*0.26)*mk, ay: Math.min(34, gap*0.22)*mk, az: Math.min(36, gap*0.20)*mk,
+        f: fr, p: ph, t0: tt + 3, mk: mk
+      };
+    }
+    var wr = Math.min(1, Math.max(0, (tt - Wd.t0) / 8));        // 入场后 3s 开始、8s 缓缓淡入
+    wr = wr*wr*(3 - 2*wr);
+    var F = Wd.f, P = Wd.p;
+    var xa = F[0]*tt + P[0], xb = F[1]*1.9*tt + P[1];
+    var ya = F[2]*tt + P[2], yb = F[3]*1.9*tt + P[3];
+    var za = F[4]*tt + P[4], zb = F[5]*1.9*tt + P[5];
+    var wdx = (0.65*Math.sin(xa) + 0.35*Math.sin(xb)) * Wd.ax * wr + Math.sin(tt*0.062)*9*Wd.mk*wr;
+    var wdy = (0.65*Math.sin(ya) + 0.35*Math.sin(yb)) * Wd.ay * wr + Math.sin(tt*0.048 + 1.3)*6*Wd.mk*wr;
+    var wdz = (0.65*Math.sin(za) + 0.35*Math.sin(zb)) * Wd.az * wr + Math.sin(tt*0.041 + 0.7)*7*Wd.mk*wr;
+    // 下风向缓慢倾斜（带惯性，主流转向时也是慢慢跟过去）
+    var Ls = S.lean || (S.lean = {x:0, y:0, z:0}), lk = 1 - Math.exp(-dt/6), lg = 9*bz*Wd.mk*wr;
+    Ls.x += (_flow.x*lg - Ls.x)*lk; Ls.y += (_flow.y*lg - Ls.y)*lk; Ls.z += (_flow.z*lg - Ls.z)*lk;
+    wdx += Ls.x; wdy += Ls.y; wdz += Ls.z;
+    // 滚转：速度（解析导数）× 压力中心偏移
+    var wvx = Wd.ax*(0.65*F[0]*Math.cos(xa) + 0.35*F[1]*1.9*Math.cos(xb))*wr;
+    var wvy = Wd.ay*(0.65*F[2]*Math.cos(ya) + 0.35*F[3]*1.9*Math.cos(yb))*wr;
+    var wvz = Wd.az*(0.65*F[4]*Math.cos(za) + 0.35*F[5]*1.9*Math.cos(zb))*wr;
+    var tqx = S.lever.y*wvz - S.lever.z*wvy, tqy = S.lever.z*wvx - S.lever.x*wvz, tqz = S.lever.x*wvy - S.lever.y*wvx;
+    var tql = Math.sqrt(tqx*tqx + tqy*tqy + tqz*tqz);
+    if(tql > 1e-5){
+      _ccAx.set(tqx/tql, tqy/tql, tqz/tql);
+      cr.group.rotateOnWorldAxis(_ccAx, tql*0.05*dt*calm*(1 - 0.85*cr.hoverT));
+    }
+
+    _ccOut.x = (S.ox + wdx)*calm; _ccOut.y = (S.oy + wdy)*calm; _ccOut.z = (S.oz*0.85 + wdz)*calm;
     return _ccOut;
   };
 
