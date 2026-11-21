@@ -2963,6 +2963,14 @@ window._sceneState = {
   var _swayInner = {x:0,y:0,z:0};
   var _swayOuter = {x:0,y:0,z:0};
 
+  // ── 帧率无关的平滑系数 ──
+  // 原写法 x += (target-x)*a 是“每帧”系数：刷新率越高，追得越快，晃动手感随显示器变化。
+  // 这里把系数 a 标定在 120fps（即 120Hz 屏上的原手感），再按真实 dt 换算：
+  //   k = 1 - (1-a)^(dt*120)
+  // 120Hz 下与原实现逐帧完全相同；60Hz 下每帧自动加倍追赶，实时响应速度一致；144/240Hz 同理。
+  var _K_REF_FPS = 120;
+  function _k120(a, dt){ return 1 - Math.pow(1 - a, dt * _K_REF_FPS); }
+
   // FOV breathing: ×4 amplitude — breaks ~0.3° perceptual threshold for real lens feel
   var _fovSway = { lf:0.29, mf:0.71, la:0.0195, ma:0.0072, p0:0.88, p1:4.22 };
 
@@ -7268,13 +7276,15 @@ resetIdleTimer();
       var _ty = _axisNoise(_swayAxes.y, t, _vnSeeds[1]);
       var _tz = _axisNoise(_swayAxes.z, t, _vnSeeds[2]);
 
-      _swayInner.x += (_tx - _swayInner.x) * 0.12;
-      _swayInner.y += (_ty - _swayInner.y) * 0.12;
-      _swayInner.z += (_tz - _swayInner.z) * 0.12;
+      var _kSwIn  = _k120(0.12,  _dtc);   // 内层：标定 120fps
+      var _kSwOut = _k120(0.038, _dtc);   // 外层：标定 120fps
+      _swayInner.x += (_tx - _swayInner.x) * _kSwIn;
+      _swayInner.y += (_ty - _swayInner.y) * _kSwIn;
+      _swayInner.z += (_tz - _swayInner.z) * _kSwIn;
       // 0.038 (was 0.055) — longer inertial tail, settles with aftershock
-      _swayOuter.x += (_swayInner.x - _swayOuter.x) * 0.038;
-      _swayOuter.y += (_swayInner.y - _swayOuter.y) * 0.038;
-      _swayOuter.z += (_swayInner.z - _swayOuter.z) * 0.038;
+      _swayOuter.x += (_swayInner.x - _swayOuter.x) * _kSwOut;
+      _swayOuter.y += (_swayInner.y - _swayOuter.y) * _kSwOut;
+      _swayOuter.z += (_swayInner.z - _swayOuter.z) * _kSwOut;
 
       // Apply scaled by introProgress × panelSlowT — zero at start, full after landing
       var _swayMul = _introProgress * panelSlowT;
@@ -7287,7 +7297,7 @@ resetIdleTimer();
                  + _fovSway.ma * Math.sin(t * _fovSway.mf + _fovSway.p1)
                  + _vNoise(t * 0.038 + _vnSeeds[4]) * _fovSway.la * 0.18);
       _FOV_BASE = 55 - 8*focusE;                      // 聚焦时镜头收窄，更有长焦压缩感
-      _fovCurrent += ((_FOV_BASE + _dfov * 19.1 * _swayMul) - _fovCurrent) * 0.028;
+      _fovCurrent += ((_FOV_BASE + _dfov * 19.1 * _swayMul) - _fovCurrent) * _k120(0.028, _dtc);
       camera.fov = _fovCurrent;
       camera.updateProjectionMatrix();
     }
