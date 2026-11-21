@@ -3576,7 +3576,7 @@ window._sceneState = {
     var isCorner = cr.isCorner;
 
     if(isCorner){
-      el.style.cssText = 'position:fixed;pointer-events:all;opacity:1;transition:opacity .3s ease;z-index:9000;cursor:pointer;will-change:filter;';
+      el.style.cssText = 'position:fixed;pointer-events:all;opacity:1;transition:opacity .3s ease;z-index:9000;cursor:inherit;will-change:filter;';
       if(i===0){
         el.style.left      = isMobile ? '14px' : '32px';
         el.style.top       = isMobile ? '68px'  : '92px';
