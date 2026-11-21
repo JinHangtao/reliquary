@@ -5009,6 +5009,9 @@ window._sceneState = {
     _ph.addEventListener('touchstart', function(e){
       if(!panelOpen || _swClosing) return;
       if(e.touches.length > 1) return;
+      // 点在叉号按钮上：不要启动下滑关闭手势，否则 touchend 会触发 _swSnapBack，
+      // 给抽屉写上 inline transform，盖住 closePanel 的 CSS 动画，造成约 650ms 延迟
+      if(e.target && e.target.closest && e.target.closest('.panel-close')) return;
       _swStopRaf();
       _swSy = _swLastY = e.touches[0].clientY;
       _swLastT = e.timeStamp || Date.now(); _swVel = 0;
