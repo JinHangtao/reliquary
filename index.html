@@ -5021,6 +5021,21 @@ window._sceneState = {
       document.addEventListener('touchend',    _swEnd,    {passive:true});
       document.addEventListener('touchcancel', _swCancel, {passive:true});
     }, {passive:true});
+
+    // 点击 ✕ / 点遮罩关闭：复用下滑关闭的同一套动画（抽屉滑出 + 镜头快速回位），无延迟
+    window._mobileTapClose = function(){
+      if(!panelOpen || _swClosing || _swTracking) return false;
+      if(document.getElementById('lb').classList.contains('on') || Date.now() - (window._lbClosedAt || 0) < 120) return false;
+      if(Date.now() - _panelOpenedAt < 350) return false;
+      _swStopRaf();
+      _swCur = 0; _swDy = 0; _swVel = 2.2;      // 等效于一次快速下滑，动画时长约 0.3s
+      _pi.style.transition = 'none';
+      _pbg.style.transition = 'none';
+      if(_three) _three.style.transition = 'none';
+      void _pi.offsetHeight;                      // 固定起点后再启动过渡
+      _swFlingClose();
+      return true;
+    };
   }
 
   var _panelOpenedAt = 0;
@@ -5119,8 +5134,29 @@ window._sceneState = {
     window._sceneState.panelDriftTarget = 0;
   }
 
-  panelClose.addEventListener('click',closePanel);
-  panelBg.addEventListener('click',closePanel);
+  function _closeSmart(){
+    if(isMobile && window._mobileTapClose && window._mobileTapClose()) return;
+    closePanel();
+  }
+  panelClose.addEventListener('click',_closeSmart);
+  panelBg.addEventListener('click',_closeSmart);
+  // 手机：手指一抬起就关闭，不等浏览器补发的 click；并屏蔽随后的 click 避免重复触发
+  if(isMobile){
+    var _tcStart = null, _tcSkipClickT = 0;
+    panelClose.style.touchAction = 'manipulation';
+    panelClose.addEventListener('touchstart', function(e){
+      var t = e.touches[0]; _tcStart = t ? {x:t.clientX, y:t.clientY} : null;
+    }, {passive:true});
+    panelClose.addEventListener('touchend', function(e){
+      var t = e.changedTouches[0];
+      if(!_tcStart || !t) return;
+      var moved = Math.abs(t.clientX - _tcStart.x) + Math.abs(t.clientY - _tcStart.y);
+      _tcStart = null;
+      if(moved > 12) return;                      // 滑动不算点击
+      e.preventDefault();                         // 阻止后续 click
+      _closeSmart();
+    }, {passive:false});
+  }
 
   // Keep cursor normal while mouse moves inside panel overlay
   document.getElementById('panelInner').addEventListener('mousemove', function(){
