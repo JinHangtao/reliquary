@@ -1177,6 +1177,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 @media (max-width:768px){
   #panel .panel-topblur .tb i{ display:none; }
   #panel .panel-topblur .tb::after{ -webkit-mask-image:none; mask-image:none; }
+  #panel .panel-inner{ overscroll-behavior-y:contain; }   /* 顶部下拉不再触发浏览器自带的回弹/刷新，把手势留给抽屉 */
 }
 @media (prefers-reduced-transparency:reduce){ #panel .panel-topblur .tb i{ display:none; } }
 </style>
@@ -5355,6 +5356,45 @@ window._sceneState = {
     };
     _ph.addEventListener('touchstart', _swStart, {passive:true});
     var _phHero = document.querySelector('.panel-hero'); if(_phHero) _phHero.addEventListener('touchstart', _swStart, {passive:true});
+
+    // ── 从抽屉任意位置下拉关闭（内容已在顶部时）──
+    // 原先只有标题区 (.panel-hero) 绑了手势，向下滚过再回到顶后，手指多半落在正文上，
+    // 所以拖不动、退不出来。这里在整个抽屉上监听：触摸开始时内容在顶部 + 向下为主的拖动 → 接管为关闭手势。
+    var _bdY = 0, _bdX = 0, _bdArmed = false, _bdOn = false;
+    function _bdSkip(t){
+      if(!t || !t.closest) return false;
+      if(t.closest('.panel-close,.audio-bar,input,textarea,select,iframe,video')) return true;
+      for(var n = t; n && n !== _pi; n = n.parentElement){      // 内部另有可滚动区域且不在顶部：让它自己滚
+        if(n.scrollHeight > n.clientHeight + 1 && n.scrollTop > 0){
+          var oy = getComputedStyle(n).overflowY;
+          if(oy === 'auto' || oy === 'scroll') return true;
+        }
+      }
+      return false;
+    }
+    function _bdReset(){ _bdArmed = false; _bdOn = false; }
+    _pi.addEventListener('touchstart', function(e){
+      _bdReset();
+      if(!panelOpen || _swClosing || _swTracking || e.touches.length !== 1) return;
+      if(_bdSkip(e.target)) return;
+      _bdY = e.touches[0].clientY; _bdX = e.touches[0].clientX;
+      _bdArmed = _pi.scrollTop <= 1;                          // 必须是在顶部按下的
+    }, {passive:true});
+    _pi.addEventListener('touchmove', function(e){
+      if(_bdOn){ if(e.cancelable) e.preventDefault(); return; }
+      if(!_bdArmed || _swTracking || e.touches.length !== 1) return;
+      if(_pi.scrollTop > 1){ _bdArmed = false; return; }
+      var dy = e.touches[0].clientY - _bdY, dx = e.touches[0].clientX - _bdX;
+      if(Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)){ _bdArmed = false; return; }   // 横向手势不管
+      if(dy > 10 && dy > Math.abs(dx) * 1.2){
+        _bdOn = true; _bdArmed = false;
+        _swStart(e);                                          // 交给原有的下拉关闭逻辑
+        _swSy = _bdY + 8;                                     // 从刚过阈值的位置接着拖，不跳
+        if(e.cancelable) e.preventDefault();
+      }
+    }, {passive:false});
+    _pi.addEventListener('touchend',    _bdReset, {passive:true});
+    _pi.addEventListener('touchcancel', _bdReset, {passive:true});
   }
 
   var _panelOpenedAt = 0;
