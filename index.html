@@ -1136,7 +1136,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 /* ══ 顶部雾化：纯粹的渐进模糊，没有任何暗色/边线 ══
    8 层极轻的 backdrop-filter（最大 4.5px），各自用渐变遮罩错开，叠出连续的朦胧感；
    高度随滚动由 --tb(0→1) 长出来，停在顶部时不存在。 */
-#panel .panel-topblur{ position:sticky; top:0; z-index:5; flex:none; align-self:stretch; height:0; pointer-events:none; --tb-h:170px; }
+#panel .panel-topblur{ position:sticky; top:0; z-index:5; flex:none; align-self:stretch; height:0; pointer-events:none; --tb-h:130px; }
 #panel .panel-topblur .tb{ position:absolute; left:0; right:0; top:0; height:calc(var(--tb,0) * var(--tb-h)); pointer-events:none; }
 #panel .panel-topblur .tb i{ position:absolute; inset:0; }
 #panel .panel-topblur .tb i:nth-child(1){ -webkit-backdrop-filter:blur(0.3px); backdrop-filter:blur(0.3px); --mv:linear-gradient(to top,transparent 0%,#000 10.0%,#000 20.0%,transparent 30.0%); }
@@ -1151,7 +1151,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 /* ── 四周羽化：模糊层本身不再有任何直边 ──
    每一层 = 纵向渐隐 ∩ 左右羽化 ∩ 顶部羽化（mask-composite 取交集）。
    注意：遮罩必须直接加在每个 <i> 上，不能加在父级——父级加 mask 会变成 backdrop root，子层的 backdrop-filter 会失效。 */
-#panel .panel-topblur .tb{ --mh:linear-gradient(to right, rgba(0,0,0,0.000) 0px, rgba(0,0,0,0.034) 22px, rgba(0,0,0,0.126) 44px, rgba(0,0,0,0.259) 67px, rgba(0,0,0,0.417) 89px, rgba(0,0,0,0.583) 111px, rgba(0,0,0,0.741) 133px, rgba(0,0,0,0.874) 156px, rgba(0,0,0,0.966) 178px, rgba(0,0,0,1.000) 200px, #000 200px, #000 calc(100% - 72px), rgba(0,0,0,1.000) calc(100% - 72px), rgba(0,0,0,0.966) calc(100% - 64px), rgba(0,0,0,0.874) calc(100% - 56px), rgba(0,0,0,0.741) calc(100% - 48px), rgba(0,0,0,0.583) calc(100% - 40px), rgba(0,0,0,0.417) calc(100% - 32px), rgba(0,0,0,0.259) calc(100% - 24px), rgba(0,0,0,0.126) calc(100% - 16px), rgba(0,0,0,0.034) calc(100% - 8px), rgba(0,0,0,0.000) calc(100% - 0px)); }
+#panel .panel-topblur .tb{ --mh:linear-gradient(to right, rgba(0,0,0,0.000) 0px, rgba(0,0,0,0.028) 15px, rgba(0,0,0,0.104) 30px, rgba(0,0,0,0.216) 45px, rgba(0,0,0,0.352) 60px, rgba(0,0,0,0.500) 75px, rgba(0,0,0,0.648) 90px, rgba(0,0,0,0.784) 105px, rgba(0,0,0,0.896) 120px, rgba(0,0,0,0.972) 135px, rgba(0,0,0,1.000) 150px, #000 150px, #000 calc(100% - 20px), rgba(0,0,0,1.000) calc(100% - 20px), rgba(0,0,0,0.972) calc(100% - 18px), rgba(0,0,0,0.896) calc(100% - 16px), rgba(0,0,0,0.784) calc(100% - 14px), rgba(0,0,0,0.648) calc(100% - 12px), rgba(0,0,0,0.500) calc(100% - 10px), rgba(0,0,0,0.352) calc(100% - 8px), rgba(0,0,0,0.216) calc(100% - 6px), rgba(0,0,0,0.104) calc(100% - 4px), rgba(0,0,0,0.028) calc(100% - 2px), rgba(0,0,0,0.000) 100%); }
 #panel .panel-topblur .tb i{
   -webkit-mask-image:var(--mv),var(--mh); mask-image:var(--mv),var(--mh);
   -webkit-mask-composite:source-in; mask-composite:intersect;
@@ -1166,7 +1166,6 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 @media (max-width:768px){
   #panel .panel-topblur .tb{ --mh:linear-gradient(to right, rgba(0,0,0,0.000) 0px, rgba(0,0,0,0.104) 6px, rgba(0,0,0,0.352) 11px, rgba(0,0,0,0.648) 17px, rgba(0,0,0,0.896) 22px, rgba(0,0,0,1.000) 28px, #000 28px, #000 calc(100% - 28px), rgba(0,0,0,1.000) calc(100% - 28px), rgba(0,0,0,0.896) calc(100% - 22px), rgba(0,0,0,0.648) calc(100% - 17px), rgba(0,0,0,0.352) calc(100% - 11px), rgba(0,0,0,0.104) calc(100% - 6px), rgba(0,0,0,0.000) calc(100% - 0px)); }
 }
-@media (max-width:768px){ #panel .panel-topblur{ --tb-h:110px; } }
 @media (prefers-reduced-transparency:reduce){ #panel .panel-topblur .tb i{ display:none; } }
 </style>
 </head>
