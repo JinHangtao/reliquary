@@ -970,6 +970,8 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 .lang-in{position:absolute;left:0;top:0;box-sizing:border-box;width:calc(var(--w1,212px) - 2px);padding:calc(var(--hh,32px) + 8px) 6px 6px}  /* +8px：分隔线与首项金光之间留出间隙，避免两条金色渐变贴在一起 */
 .lang-spot{position:absolute;inset:0;pointer-events:none;background:radial-gradient(170px circle at var(--mx,40%) var(--my,30%),rgba(232,200,128,.085),rgba(232,200,128,0) 70%);opacity:0;transition:opacity .6s ease}
 #langMenu.open:hover .lang-spot{opacity:1}
+.lang-liquid{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;opacity:0;transition:opacity 1.1s ease}
+.lang-liquid.on{opacity:1;transition-duration:.5s}
 
 .lang-head{position:absolute;left:0;right:0;top:0;height:var(--hh,32px);display:flex;align-items:center;justify-content:flex-end;box-sizing:border-box;padding:0 16px 0 var(--cl,60px);cursor:inherit}
 .lang-head::after{content:"";position:absolute;left:14px;right:14px;bottom:0;height:1px;background:linear-gradient(90deg,rgba(212,168,90,.34),rgba(212,168,90,.05));transform:scaleX(0);transform-origin:left;transition:transform .25s ease}
@@ -980,6 +982,8 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 .lang-glow{position:absolute;left:6px;right:6px;top:0;height:0;border-radius:11px;background:linear-gradient(90deg,rgba(212,168,90,.17),rgba(212,168,90,.04) 70%,rgba(212,168,90,0));box-shadow:inset 0 0 0 1px rgba(212,168,90,.1);pointer-events:none;opacity:0;transition:transform .6s var(--ease-out),height .6s var(--ease-out),opacity .3s ease}
 .lang-glow::before{content:"";position:absolute;left:0;top:50%;width:2px;height:16px;margin-top:-8px;border-radius:2px;background:var(--gold)}
 .lang-glow.snap{transition:none}
+.lang-blob{position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible;pointer-events:none;opacity:0;transition:opacity .35s ease}
+.lang-in.liq-on .lang-glow{display:none}
 
 .lang-item{position:relative;z-index:1;display:flex;align-items:center;gap:14px;width:100%;padding:11px 12px 11px 8px;background:none;border:0;border-radius:11px;color:var(--fg-d);font:400 .8rem/1.2 'Jost','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;letter-spacing:.08em;text-align:left;cursor:inherit;
   opacity:0;transform:translateY(-6px);
@@ -11141,7 +11145,7 @@ document.addEventListener('keydown', e => {
   }
 
   var $ = function(id){ return document.getElementById(id); };
-  var ident, btn, menu, curTag, glow, inner, spot, head;
+  var ident, btn, menu, curTag, glow, inner, spot, head, liq;
 
   // page copy follows the language with the same blur + lift as the chip label (no hard text pop)
   function swapText(el, v){
@@ -11236,6 +11240,7 @@ document.addEventListener('keydown', e => {
   function activeItem(){ return menu.querySelector('[aria-checked="true"]') || items()[0]; }
   function moveGlow(el, snap){
     if(!glow || !el) return;
+    if(liq) liq.go(el.offsetTop, el.offsetHeight, snap);
     if(snap) glow.classList.add('snap');
     glow.style.height = el.offsetHeight + 'px';
     glow.style.transform = 'translateY(' + el.offsetTop + 'px)';
@@ -11279,6 +11284,205 @@ document.addEventListener('keydown', e => {
     if(ret) btn.focus({preventScroll:true});
   }
 
+  // ── liquid rim: the glass edge swells toward the pointer like a meniscus ──
+  // a 1-D wave simulation runs along the panel's inner edge (springs + neighbour coupling), drawn as one thin SVG band.
+  // Tune the feel here: AMP = swell height (px) · REACH = how close the pointer must be · K/C/D = spring / spread / damping.
+  function liquidEdge(menu){
+    if(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var NS = 'http://www.w3.org/2000/svg', N = 120, RAD = 17;
+    var AMP = 3, REACH = 92, SPOT = 120, T0 = 1, K = .07, C = .24, D = .13;
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'lang-liquid'); svg.setAttribute('aria-hidden', 'true');
+    svg.innerHTML =
+      '<defs>' +
+      '<radialGradient id="llFill" gradientUnits="userSpaceOnUse" r="' + SPOT + '"><stop offset="0" stop-color="#e8c880" stop-opacity=".13"/><stop offset="1" stop-color="#e8c880" stop-opacity="0"/></radialGradient>' +
+      '<radialGradient id="llEdge" gradientUnits="userSpaceOnUse" r="' + SPOT + '"><stop offset="0" stop-color="#f6e2b0" stop-opacity=".5"/><stop offset="1" stop-color="#e8c880" stop-opacity="0"/></radialGradient>' +
+      '</defs>' +
+      '<path fill="url(#llFill)" fill-rule="evenodd"/>' +
+      '<path fill="none" stroke="url(#llEdge)" stroke-width="1" stroke-linejoin="round"/>';
+    menu.insertBefore(svg, menu.firstChild);
+    var gF = svg.querySelector('#llFill'), gE = svg.querySelector('#llEdge'), pF = svg.children[1], pE = svg.children[2];
+    var h = new Float32Array(N), v = new Float32Array(N), tg = new Float32Array(N);
+    var bx = new Float32Array(N), by = new Float32Array(N), nx = new Float32Array(N), ny = new Float32Array(N);
+    var px = 0, py = 0, spx = 0, spy = 0, lx = 0, ly = 0, has = false, raf = 0, last = 0, o = [0, 0, 0, 0];
+
+    function arc(cx, cy, a0, t){ var a = a0 + t / RAD, c = Math.cos(a), s = Math.sin(a); o[0] = cx + RAD * c; o[1] = cy + RAD * s; o[2] = -c; o[3] = -s; }
+    function sample(i, W, H){            // point + inward normal at arc-length i/N around the rounded rect
+      var A = RAD * Math.PI / 2, sw = W - 2 * RAD, sh = H - 2 * RAD, s = i / N * (2 * sw + 2 * sh + 4 * A);
+      if(s < sw){ o[0] = RAD + s; o[1] = 0; o[2] = 0; o[3] = 1; return; }  s -= sw;
+      if(s < A){ arc(W - RAD, RAD, -Math.PI / 2, s); return; }             s -= A;
+      if(s < sh){ o[0] = W; o[1] = RAD + s; o[2] = -1; o[3] = 0; return; }  s -= sh;
+      if(s < A){ arc(W - RAD, H - RAD, 0, s); return; }                    s -= A;
+      if(s < sw){ o[0] = W - RAD - s; o[1] = H; o[2] = 0; o[3] = -1; return; } s -= sw;
+      if(s < A){ arc(RAD, H - RAD, Math.PI / 2, s); return; }              s -= A;
+      if(s < sh){ o[0] = 0; o[1] = H - RAD - s; o[2] = 1; o[3] = 0; return; } s -= sh;
+      arc(RAD, RAD, Math.PI, s);
+    }
+    function frame(t){
+      raf = 0;
+      var W = menu.clientWidth, H = menu.clientHeight, i, d, w, dx, dy, e = 0;
+      var dt = Math.min(1.5, (t - last) / 16.67 || 1); last = t;
+      if(!menu.classList.contains('open') && has){ has = false; svg.classList.remove('on'); }
+      if(W < 80 || H < 50){ if(has) kick(); return; }
+      var f = Math.min(1, .2 * dt); spx += (px - spx) * f; spy += (py - spy) * f;   // the swell trails the pointer a little: elastic, connected
+      for(i = 0; i < N; i++){
+        sample(i, W, H); bx[i] = o[0]; by[i] = o[1]; nx[i] = o[2]; ny[i] = o[3];
+        if(has){ dx = bx[i] - spx; dy = by[i] - spy; w = 1 - Math.sqrt(dx * dx + dy * dy) / REACH; tg[i] = w > 0 ? AMP * w * w * (1 + .25 * Math.sin(i * .45 - t * .0035)) : 0; }
+        else tg[i] = 0;
+      }
+      for(i = 0; i < N; i++){
+        var lap = h[(i + N - 1) % N] + h[(i + 1) % N] - 2 * h[i];
+        v[i] += (K * (tg[i] - h[i]) + C * lap - D * v[i]) * dt;
+      }
+      var q = [];
+      for(i = 0; i < N; i++){
+        h[i] += v[i] * dt; if(h[i] < -T0 + .1) h[i] = -T0 + .1; else if(h[i] > AMP * 1.7) h[i] = AMP * 1.7;
+        e += Math.abs(v[i]) + Math.abs(h[i] - tg[i]);
+        q.push(bx[i] + nx[i] * (T0 + h[i]), by[i] + ny[i] * (T0 + h[i]));
+      }
+      // smooth closed curve through midpoints of the samples
+      var dstr = 'M' + ((q[2 * N - 2] + q[0]) / 2).toFixed(1) + ' ' + ((q[2 * N - 1] + q[1]) / 2).toFixed(1);
+      for(i = 0; i < N; i++){
+        var j = (i + 1) % N;
+        dstr += 'Q' + q[2 * i].toFixed(1) + ' ' + q[2 * i + 1].toFixed(1) + ' ' + ((q[2 * i] + q[2 * j]) / 2).toFixed(1) + ' ' + ((q[2 * i + 1] + q[2 * j + 1]) / 2).toFixed(1);
+      }
+      dstr += 'Z';
+      var outer = 'M' + RAD + ' 0H' + (W - RAD) + 'A' + RAD + ' ' + RAD + ' 0 0 1 ' + W + ' ' + RAD + 'V' + (H - RAD) + 'A' + RAD + ' ' + RAD + ' 0 0 1 ' + (W - RAD) + ' ' + H +
+                  'H' + RAD + 'A' + RAD + ' ' + RAD + ' 0 0 1 0 ' + (H - RAD) + 'V' + RAD + 'A' + RAD + ' ' + RAD + ' 0 0 1 ' + RAD + ' 0Z';
+      pF.setAttribute('d', outer + dstr); pE.setAttribute('d', dstr);
+      gF.setAttribute('cx', spx); gF.setAttribute('cy', spy); gE.setAttribute('cx', spx); gE.setAttribute('cy', spy);
+      if(has || e > .03) raf = requestAnimationFrame(frame);
+      else { pF.removeAttribute('d'); pE.removeAttribute('d'); }
+    }
+    function kick(){ if(!raf){ last = performance.now(); raf = requestAnimationFrame(frame); } }
+
+    menu.addEventListener('pointermove', function(e){
+      if(e.pointerType === 'touch') return;
+      var r = menu.getBoundingClientRect(), x = e.clientX - r.left - menu.clientLeft, y = e.clientY - r.top - menu.clientTop;
+      if(has){                           // fast strokes splash the surface: a ripple that runs along the rim
+        var sp = Math.min(40, Math.hypot(e.clientX - lx, e.clientY - ly));
+        for(var i = 0; i < N; i++){
+          var dx = bx[i] - x, dy = by[i] - y, w = 1 - Math.sqrt(dx * dx + dy * dy) / REACH;
+          if(w > 0) v[i] += w * w * sp * .024;
+        }
+      }
+      lx = e.clientX; ly = e.clientY; px = x; py = y; if(!has){ spx = x; spy = y; } has = true;
+      svg.classList.add('on'); kick();
+    }, {passive:true});
+    menu.addEventListener('pointerleave', function(){ has = false; svg.classList.remove('on'); kick(); });
+  }
+
+  // ── liquid selection: the highlight under the language options is a body of liquid ──
+  // It travels between options with a leading edge and a lagging edge (so it stretches in motion, then settles with a small
+  // overshoot); its surface carries the same wave sim as the rim, lit by the pointer; a press squashes it and sends a ripple.
+  function liquidBlob(inner, menu){
+    if(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return null;
+    var NS = 'http://www.w3.org/2000/svg', N = 72, X0 = 6, R0 = 11;
+    var AMP = 2.4, REACH = 64, K = .07, C = .24, D = .27;     // surface: swell height / pointer reach / spring / spread / damping
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'lang-blob'); svg.setAttribute('aria-hidden', 'true');
+    svg.innerHTML =
+      '<defs>' +
+      '<linearGradient id="lbBase" gradientUnits="userSpaceOnUse" y1="0" y2="0"><stop offset="0" stop-color="#d4a85a" stop-opacity=".15"/><stop offset=".7" stop-color="#d4a85a" stop-opacity=".05"/><stop offset="1" stop-color="#d4a85a" stop-opacity=".01"/></linearGradient>' +
+      '<linearGradient id="lbRim" gradientUnits="userSpaceOnUse" x1="0" x2="0"><stop offset="0" stop-color="#f6e2b0" stop-opacity=".3"/><stop offset=".5" stop-color="#d4a85a" stop-opacity=".12"/><stop offset="1" stop-color="#d4a85a" stop-opacity=".06"/></linearGradient>' +
+      '</defs>' +
+      '<path fill="url(#lbBase)"/><path fill="none" stroke="url(#lbRim)" stroke-width="1"/>' +
+      '<rect width="2" height="16" rx="1" fill="#d4a85a"/>';
+    inner.insertBefore(svg, inner.querySelector('.lang-glow'));
+    var gB = svg.querySelector('#lbBase'), gR = svg.querySelector('#lbRim');
+    var P = svg.querySelectorAll('path'), bar = svg.querySelector('rect');
+    var h = new Float32Array(N), v = new Float32Array(N), tg = new Float32Array(N);
+    var bx = new Float32Array(N), by = new Float32Array(N), nx = new Float32Array(N), ny = new Float32Array(N);
+    var yT = 0, yB = 0, vT = 0, vB = 0, tT = 0, tB = 0, leadDown = true, shown = false;
+    var px = 0, py = 0, spx = 0, spy = 0, lx = 0, ly = 0, has = false, raf = 0, last = 0, o = [0, 0, 0, 0];
+
+    function arc(cx, cy, R, a0, s){ var a = a0 + s / R, c = Math.cos(a), sn = Math.sin(a); o[0] = cx + R * c; o[1] = cy + R * sn; o[2] = -c; o[3] = -sn; }
+    function sample(i, x0, y0, W, H, R){        // point + inward normal around a rounded rect
+      var A = R * Math.PI / 2, sw = W - 2 * R, sh = H - 2 * R, s = i / N * (2 * sw + 2 * sh + 4 * A);
+      if(s < sw){ o[0] = x0 + R + s; o[1] = y0; o[2] = 0; o[3] = 1; return; }  s -= sw;
+      if(s < A){ arc(x0 + W - R, y0 + R, R, -Math.PI / 2, s); return; }        s -= A;
+      if(s < sh){ o[0] = x0 + W; o[1] = y0 + R + s; o[2] = -1; o[3] = 0; return; } s -= sh;
+      if(s < A){ arc(x0 + W - R, y0 + H - R, R, 0, s); return; }               s -= A;
+      if(s < sw){ o[0] = x0 + W - R - s; o[1] = y0 + H; o[2] = 0; o[3] = -1; return; } s -= sw;
+      if(s < A){ arc(x0 + R, y0 + H - R, R, Math.PI / 2, s); return; }         s -= A;
+      if(s < sh){ o[0] = x0; o[1] = y0 + H - R - s; o[2] = 1; o[3] = 0; return; } s -= sh;
+      arc(x0 + R, y0 + R, R, Math.PI, s);
+    }
+    function frame(t){
+      raf = 0;
+      var W = inner.clientWidth - 2 * X0, dt = Math.min(1.5, (t - last) / 16.67 || 1), i, d, w, dx, dy, e = 0;
+      last = t;
+      if(!menu.classList.contains('open') && has){ has = false; }
+      if(W < 40) return;
+      // edges: the one heading the way the blob travels leads (stiff), the other lags (soft) → it stretches, then pulls together
+      var kT = leadDown ? .05 : .095, kB = leadDown ? .095 : .05;
+      vT += (kT * (tT - yT) - 2 * 1.05 * Math.sqrt(kT) * vT) * dt; yT += vT * dt;
+      vB += (kB * (tB - yB) - 2 * 1.05 * Math.sqrt(kB) * vB) * dt; yB += vB * dt;
+      if(yB - yT < 16) yB = yT + 16;
+      var H = yB - yT, R = Math.min(R0, H / 2 - 1);
+      var f = Math.min(1, .2 * dt); spx += (px - spx) * f; spy += (py - spy) * f;
+      for(i = 0; i < N; i++){
+        sample(i, X0, yT, W, H, R); bx[i] = o[0]; by[i] = o[1]; nx[i] = o[2]; ny[i] = o[3];
+        if(has){ dx = bx[i] - spx; dy = by[i] - spy; w = 1 - Math.sqrt(dx * dx + dy * dy) / REACH; tg[i] = w > 0 ? AMP * w * w * (1 + .25 * Math.sin(i * .6 - t * .0035)) : 0; }
+        else tg[i] = 0;
+      }
+      for(i = 0; i < N; i++){
+        var lap = h[(i + N - 1) % N] + h[(i + 1) % N] - 2 * h[i];
+        v[i] += (K * (tg[i] - h[i]) + C * lap - D * v[i]) * dt;
+      }
+      var q = [];
+      for(i = 0; i < N; i++){
+        h[i] += v[i] * dt; if(h[i] < -1.5) h[i] = -1.5; else if(h[i] > AMP * 2.4) h[i] = AMP * 2.4;
+        e += Math.abs(v[i]) + Math.abs(h[i] - tg[i]);
+        q.push(bx[i] - nx[i] * h[i], by[i] - ny[i] * h[i]);   // pressed liquid swells outward at the nearest edge
+      }
+      var ds = 'M' + ((q[2 * N - 2] + q[0]) / 2).toFixed(1) + ' ' + ((q[2 * N - 1] + q[1]) / 2).toFixed(1);
+      for(i = 0; i < N; i++){
+        var j = (i + 1) % N;
+        ds += 'Q' + q[2 * i].toFixed(1) + ' ' + q[2 * i + 1].toFixed(1) + ' ' + ((q[2 * i] + q[2 * j]) / 2).toFixed(1) + ' ' + ((q[2 * i + 1] + q[2 * j + 1]) / 2).toFixed(1);
+      }
+      ds += 'Z';
+      P[0].setAttribute('d', ds); P[1].setAttribute('d', ds);
+      gB.setAttribute('x1', X0); gB.setAttribute('x2', X0 + W);
+      gR.setAttribute('y1', yT); gR.setAttribute('y2', yB);
+      bar.setAttribute('x', X0); bar.setAttribute('y', (yT + yB) / 2 - 8);
+      var settled = Math.abs(yT - tT) < .05 && Math.abs(yB - tB) < .05 && Math.abs(vT) < .02 && Math.abs(vB) < .02 && e < .03;
+      if(has || !settled) raf = requestAnimationFrame(frame);
+    }
+    function kick(){ if(!raf){ last = performance.now(); raf = requestAnimationFrame(frame); } }
+
+    function go(top, hgt, snap){
+      var nT = top, nB = top + hgt;
+      if(!shown || snap){ yT = tT = nT; yB = tB = nB; vT = vB = 0; shown = true; }
+      else{ var oc = (tT + tB) / 2, nc = (nT + nB) / 2; if(nc !== oc) leadDown = nc > oc; tT = nT; tB = nB; }
+      svg.style.opacity = 1; kick();
+    }
+    function local(e){ var r = inner.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+    function splash(x, y, k){
+      for(var i = 0; i < N; i++){
+        var dx = bx[i] - x, dy = by[i] - y, w = 1 - Math.sqrt(dx * dx + dy * dy) / 90;
+        if(w > 0) v[i] += w * w * 3 * k;
+      }
+      vT += 1.1 * k; vB -= 1.1 * k; kick();     // a press gently squeezes the body; it eases back without bouncing
+    }
+    menu.addEventListener('pointermove', function(e){
+      if(e.pointerType === 'touch') return;
+      var c = local(e), x = c[0], y = c[1];
+      if(has){
+        var sp = Math.min(40, Math.hypot(e.clientX - lx, e.clientY - ly));
+        for(var i = 0; i < N; i++){
+          var dx = bx[i] - x, dy = by[i] - y, w = 1 - Math.sqrt(dx * dx + dy * dy) / REACH;
+          if(w > 0) v[i] += w * w * sp * .012;
+        }
+      }
+      lx = e.clientX; ly = e.clientY; px = x; py = y; if(!has){ spx = x; spy = y; } has = true;
+      kick();
+    }, {passive:true});
+    menu.addEventListener('pointerleave', function(){ has = false; kick(); });
+    menu.addEventListener('pointerdown', function(e){ var c = local(e); splash(c[0], c[1], 1); }, {passive:true});
+    return {go: go};
+  }
+
   function init(){
     ident = $('ident'); btn = $('langBtn'); menu = $('langMenu'); curTag = $('langCur');
     if(!ident || !btn || !menu){ apply(); return; }
@@ -11289,7 +11493,9 @@ document.addEventListener('keydown', e => {
     head = document.createElement('div'); head.className = 'lang-head'; head.setAttribute('aria-hidden','true');
     head.innerHTML = '<span class="lang-cap" data-i18n="lang.cap">Language</span>';
     inner.appendChild(spot); inner.appendChild(glow); inner.appendChild(head);
+    liq = liquidBlob(inner, menu); if(liq) inner.classList.add('liq-on');
     menu.appendChild(inner);
+    liquidEdge(menu);
     (function(){ var il = curTag.parentNode, g = document.createElement('span'); g.className = 'lang-glint'; g.setAttribute('aria-hidden','true'); g.appendChild(document.createElement('i')); il.appendChild(g); })();
 
     LANGS.forEach(function(L, idx){
