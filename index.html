@@ -1171,6 +1171,13 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 @media (max-width:768px){
   #panel .panel-topblur .tb{ --mh:linear-gradient(to right, rgba(0,0,0,0.000) 0px, rgba(0,0,0,0.104) 6px, rgba(0,0,0,0.352) 11px, rgba(0,0,0,0.648) 17px, rgba(0,0,0,0.896) 22px, rgba(0,0,0,1.000) 28px, #000 28px, #000 calc(100% - 28px), rgba(0,0,0,1.000) calc(100% - 28px), rgba(0,0,0,0.896) calc(100% - 22px), rgba(0,0,0,0.648) calc(100% - 17px), rgba(0,0,0,0.352) calc(100% - 11px), rgba(0,0,0,0.104) calc(100% - 6px), rgba(0,0,0,0.000) calc(100% - 0px)); }
 }
+/* ── 手机端（底部抽屉）：与 PC 端同一套「顶部暗雾」逻辑 ──
+   去掉磨砂层（8 层 backdrop-filter），只保留同色暗雾从顶部缓缓淡出；
+   抽屉是整宽的、左右没有半透明边，所以暗雾不需要左右羽化，直接铺满整行。 */
+@media (max-width:768px){
+  #panel .panel-topblur .tb i{ display:none; }
+  #panel .panel-topblur .tb::after{ -webkit-mask-image:none; mask-image:none; }
+}
 @media (prefers-reduced-transparency:reduce){ #panel .panel-topblur .tb i{ display:none; } }
 </style>
 </head>
