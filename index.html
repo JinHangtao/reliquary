@@ -443,8 +443,8 @@ body.panel-open #three { transform:translateX(-3.5vw); }
   position:absolute; top:0; bottom:0; right:0; pointer-events:none;
   width:calc(clamp(520px,72vw,1100px) + 200px);
   background:
-    linear-gradient(to right, rgba(10,9,8,0) 0px, rgba(10,9,8,0.000) 40px, rgba(10,9,8,0.010) 68px, rgba(10,9,8,0.039) 96px, rgba(10,9,8,0.083) 124px, rgba(10,9,8,0.139) 151px, rgba(10,9,8,0.204) 179px, rgba(10,9,8,0.276) 207px, rgba(10,9,8,0.350) 235px, rgba(10,9,8,0.424) 263px, rgba(10,9,8,0.496) 291px, rgba(10,9,8,0.561) 319px, rgba(10,9,8,0.617) 346px, rgba(10,9,8,0.661) 374px, rgba(10,9,8,0.690) 402px, rgba(10,9,8,0.700) 430px, rgba(10,9,8,0.700) 4000px),
-    linear-gradient(to right, rgba(10,9,8,0) 0px, rgba(10,9,8,0.000) 0px, rgba(10,9,8,0.004) 16px, rgba(10,9,8,0.017) 31px, rgba(10,9,8,0.035) 47px, rgba(10,9,8,0.059) 63px, rgba(10,9,8,0.087) 79px, rgba(10,9,8,0.118) 94px, rgba(10,9,8,0.150) 110px, rgba(10,9,8,0.182) 126px, rgba(10,9,8,0.213) 141px, rgba(10,9,8,0.241) 157px, rgba(10,9,8,0.265) 173px, rgba(10,9,8,0.283) 189px, rgba(10,9,8,0.296) 204px, rgba(10,9,8,0.300) 220px, rgba(10,9,8,0.300) 4000px);   /* 通透：一路缓缓铺过去，最深约 0.79，抽屉里还能隐约透出场景的光 */
+    linear-gradient(to right, rgba(10,9,8,0.000) 0px, rgba(10,9,8,0.000) 40px, rgba(10,9,8,0.009) 68px, rgba(10,9,8,0.034) 96px, rgba(10,9,8,0.073) 124px, rgba(10,9,8,0.122) 151px, rgba(10,9,8,0.180) 179px, rgba(10,9,8,0.243) 207px, rgba(10,9,8,0.308) 235px, rgba(10,9,8,0.373) 263px, rgba(10,9,8,0.436) 291px, rgba(10,9,8,0.494) 319px, rgba(10,9,8,0.543) 346px, rgba(10,9,8,0.582) 374px, rgba(10,9,8,0.607) 402px, rgba(10,9,8,0.616) 430px, rgba(10,9,8,0.616) 4000px),
+    linear-gradient(to right, rgba(10,9,8,0.000) 0px, rgba(10,9,8,0.000) 0px, rgba(10,9,8,0.004) 16px, rgba(10,9,8,0.015) 31px, rgba(10,9,8,0.031) 47px, rgba(10,9,8,0.052) 63px, rgba(10,9,8,0.077) 79px, rgba(10,9,8,0.104) 94px, rgba(10,9,8,0.132) 110px, rgba(10,9,8,0.160) 126px, rgba(10,9,8,0.187) 141px, rgba(10,9,8,0.212) 157px, rgba(10,9,8,0.233) 173px, rgba(10,9,8,0.249) 189px, rgba(10,9,8,0.260) 204px, rgba(10,9,8,0.264) 220px, rgba(10,9,8,0.264) 4000px);   /* 通透：一路缓缓铺过去，最深约 0.79，抽屉里还能隐约透出场景的光 */
   opacity:0; transform:translateX(40px); will-change:opacity,transform; contain:strict;
   transition:opacity .75s cubic-bezier(.4,0,.2,1), transform .95s cubic-bezier(.16,1,.3,1);
 }
@@ -714,10 +714,16 @@ body::after {
 /* ── Panel body scroll fade ── */
 .panel-scroll-fade {
   position:sticky; bottom:0; left:0; right:0; height:64px;
-  background:linear-gradient(to bottom, transparent, rgba(10,9,8,.96));
+  background:linear-gradient(to bottom, rgba(10,9,8,0.000) 0%, rgba(10,9,8,0.041) 12%, rgba(10,9,8,0.150) 25%, rgba(10,9,8,0.304) 38%, rgba(10,9,8,0.480) 50%, rgba(10,9,8,0.656) 62%, rgba(10,9,8,0.810) 75%, rgba(10,9,8,0.919) 88%, rgba(10,9,8,0.960) 100%);
+  /* 左右羽化：原来这条暗带的左端是一条直边，叠在抽屉左侧还很透明的区域上就成了一道黑边 */
+  -webkit-mask-image:linear-gradient(to right, rgba(0,0,0,0.000) 0px, rgba(0,0,0,0.034) 22px, rgba(0,0,0,0.126) 44px, rgba(0,0,0,0.259) 67px, rgba(0,0,0,0.417) 89px, rgba(0,0,0,0.583) 111px, rgba(0,0,0,0.741) 133px, rgba(0,0,0,0.874) 156px, rgba(0,0,0,0.966) 178px, rgba(0,0,0,1.000) 200px, #000 200px, #000 calc(100% - 72px), rgba(0,0,0,1.000) calc(100% - 72px), rgba(0,0,0,0.966) calc(100% - 64px), rgba(0,0,0,0.874) calc(100% - 56px), rgba(0,0,0,0.741) calc(100% - 48px), rgba(0,0,0,0.583) calc(100% - 40px), rgba(0,0,0,0.417) calc(100% - 32px), rgba(0,0,0,0.259) calc(100% - 24px), rgba(0,0,0,0.126) calc(100% - 16px), rgba(0,0,0,0.034) calc(100% - 8px), rgba(0,0,0,0.000) calc(100% - 0px));
+  mask-image:linear-gradient(to right, rgba(0,0,0,0.000) 0px, rgba(0,0,0,0.034) 22px, rgba(0,0,0,0.126) 44px, rgba(0,0,0,0.259) 67px, rgba(0,0,0,0.417) 89px, rgba(0,0,0,0.583) 111px, rgba(0,0,0,0.741) 133px, rgba(0,0,0,0.874) 156px, rgba(0,0,0,0.966) 178px, rgba(0,0,0,1.000) 200px, #000 200px, #000 calc(100% - 72px), rgba(0,0,0,1.000) calc(100% - 72px), rgba(0,0,0,0.966) calc(100% - 64px), rgba(0,0,0,0.874) calc(100% - 56px), rgba(0,0,0,0.741) calc(100% - 48px), rgba(0,0,0,0.583) calc(100% - 40px), rgba(0,0,0,0.417) calc(100% - 32px), rgba(0,0,0,0.259) calc(100% - 24px), rgba(0,0,0,0.126) calc(100% - 16px), rgba(0,0,0,0.034) calc(100% - 8px), rgba(0,0,0,0.000) calc(100% - 0px));
   pointer-events:none; z-index:3;
   opacity:1; transition:opacity .4s ease;
   margin-top:-64px;
+}
+@media (max-width:768px){
+  .panel-scroll-fade{ -webkit-mask-image:none; mask-image:none; }
 }
 .panel-scroll-fade.hidden { opacity:0; }
 
@@ -1081,7 +1087,6 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
    ══════════════════════════════════════════════════════════ */
 #panel .panel-hero{ padding:0 44px 0; position:relative; }
 #panel .panel-hero .panel-eyebrow{ margin-bottom:10px; }
-#panel .panel-hero .panel-title{ transform:none !important; }
 #panel .panel-hero .panel-head-top{ margin-bottom:16px; padding-right:56px; }
 #panel .panel-body{ padding-top:0; }
 #panel .panel-body::before{
@@ -1101,7 +1106,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 }
 #panel .panel-head::before,#panel .panel-head::after{ display:none !important; }
 #panel .panel-head .panel-close{
-  position:absolute; right:44px; top:22px; margin:0 !important; pointer-events:auto;
+  position:absolute; right:10px; top:22px; margin:0 !important; pointer-events:auto;
   width:34px; height:34px; transform:none !important; transform-origin:center;
   border-radius:calc(10px + 7px*var(--p));
   border:1px solid rgba(255,255,255,calc(.12 - .05*var(--p)));
@@ -1121,12 +1126,48 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
   #panel .panel-hero{ padding:0 18px 0; }
   #panel .panel-hero::before{ content:''; position:absolute; top:-21px; left:50%; width:32px; height:3px; margin-left:-16px; background:rgba(255,255,255,.22); border-radius:2px; }
   #panel .panel-head{ margin-top:30px; }
-  #panel .panel-head .panel-close{ right:18px; top:20px; width:36px; height:36px; }
+  #panel .panel-head .panel-close{ right:8px; top:20px; width:36px; height:36px; }
   #panel .panel-hero .panel-head-top{ margin-bottom:12px; padding-right:50px; }
 }
 @media (prefers-reduced-motion:reduce){
   #panel.on .panel-body::before{ animation:none; transform:none; }
 }
+
+/* ══ 顶部雾化：纯粹的渐进模糊，没有任何暗色/边线 ══
+   8 层极轻的 backdrop-filter（最大 4.5px），各自用渐变遮罩错开，叠出连续的朦胧感；
+   高度随滚动由 --tb(0→1) 长出来，停在顶部时不存在。 */
+#panel .panel-topblur{ position:sticky; top:0; z-index:5; flex:none; align-self:stretch; height:0; pointer-events:none; --tb-h:170px; }
+#panel .panel-topblur .tb{ position:absolute; left:0; right:0; top:0; height:calc(var(--tb,0) * var(--tb-h)); pointer-events:none; }
+#panel .panel-topblur .tb i{ position:absolute; inset:0; }
+#panel .panel-topblur .tb i:nth-child(1){ -webkit-backdrop-filter:blur(0.3px); backdrop-filter:blur(0.3px); --mv:linear-gradient(to top,transparent 0%,#000 10.0%,#000 20.0%,transparent 30.0%); }
+#panel .panel-topblur .tb i:nth-child(2){ -webkit-backdrop-filter:blur(0.7px); backdrop-filter:blur(0.7px); --mv:linear-gradient(to top,transparent 10.0%,#000 20.0%,#000 30.0%,transparent 40.0%); }
+#panel .panel-topblur .tb i:nth-child(3){ -webkit-backdrop-filter:blur(1.3px); backdrop-filter:blur(1.3px); --mv:linear-gradient(to top,transparent 20.0%,#000 30.0%,#000 40.0%,transparent 50.0%); }
+#panel .panel-topblur .tb i:nth-child(4){ -webkit-backdrop-filter:blur(2.2px); backdrop-filter:blur(2.2px); --mv:linear-gradient(to top,transparent 30.0%,#000 40.0%,#000 50.0%,transparent 60.0%); }
+#panel .panel-topblur .tb i:nth-child(5){ -webkit-backdrop-filter:blur(3.5px); backdrop-filter:blur(3.5px); --mv:linear-gradient(to top,transparent 40.0%,#000 50.0%,#000 60.0%,transparent 70.0%); }
+#panel .panel-topblur .tb i:nth-child(6){ -webkit-backdrop-filter:blur(5.3px); backdrop-filter:blur(5.3px); --mv:linear-gradient(to top,transparent 50.0%,#000 60.0%,#000 70.0%,transparent 80.0%); }
+#panel .panel-topblur .tb i:nth-child(7){ -webkit-backdrop-filter:blur(7.5px); backdrop-filter:blur(7.5px); --mv:linear-gradient(to top,transparent 60.0%,#000 70.0%,#000 80.0%,transparent 90.0%); }
+#panel .panel-topblur .tb i:nth-child(8){ -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); --mv:linear-gradient(to top,transparent 70.0%,#000 80.0%,#000 100%); }
+
+/* ── 四周羽化：模糊层本身不再有任何直边 ──
+   每一层 = 纵向渐隐 ∩ 左右羽化 ∩ 顶部羽化（mask-composite 取交集）。
+   注意：遮罩必须直接加在每个 <i> 上，不能加在父级——父级加 mask 会变成 backdrop root，子层的 backdrop-filter 会失效。 */
+#panel .panel-topblur .tb{ --mh:linear-gradient(to right, rgba(0,0,0,0.000) 0px, rgba(0,0,0,0.034) 22px, rgba(0,0,0,0.126) 44px, rgba(0,0,0,0.259) 67px, rgba(0,0,0,0.417) 89px, rgba(0,0,0,0.583) 111px, rgba(0,0,0,0.741) 133px, rgba(0,0,0,0.874) 156px, rgba(0,0,0,0.966) 178px, rgba(0,0,0,1.000) 200px, #000 200px, #000 calc(100% - 72px), rgba(0,0,0,1.000) calc(100% - 72px), rgba(0,0,0,0.966) calc(100% - 64px), rgba(0,0,0,0.874) calc(100% - 56px), rgba(0,0,0,0.741) calc(100% - 48px), rgba(0,0,0,0.583) calc(100% - 40px), rgba(0,0,0,0.417) calc(100% - 32px), rgba(0,0,0,0.259) calc(100% - 24px), rgba(0,0,0,0.126) calc(100% - 16px), rgba(0,0,0,0.034) calc(100% - 8px), rgba(0,0,0,0.000) calc(100% - 0px)); }
+#panel .panel-topblur .tb i{
+  -webkit-mask-image:var(--mv),var(--mh); mask-image:var(--mv),var(--mh);
+  -webkit-mask-composite:source-in; mask-composite:intersect;
+}
+/* 极淡的暗雾：和抽屉底色同色(10,9,8)，从顶部缓缓淡出；同样左右羽化，没有任何直边。
+   画在伪元素上（遮罩加在伪元素自己身上，不影响上面各层 backdrop-filter）。 */
+#panel .panel-topblur .tb::after{
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(to bottom, rgba(10,9,8,0.580) 0%, rgba(10,9,8,0.555) 12%, rgba(10,9,8,0.489) 25%, rgba(10,9,8,0.396) 38%, rgba(10,9,8,0.290) 50%, rgba(10,9,8,0.184) 62%, rgba(10,9,8,0.091) 75%, rgba(10,9,8,0.025) 88%, rgba(10,9,8,0.000) 100%);
+  -webkit-mask-image:var(--mh); mask-image:var(--mh);
+}
+@media (max-width:768px){
+  #panel .panel-topblur .tb{ --mh:linear-gradient(to right, rgba(0,0,0,0.000) 0px, rgba(0,0,0,0.104) 6px, rgba(0,0,0,0.352) 11px, rgba(0,0,0,0.648) 17px, rgba(0,0,0,0.896) 22px, rgba(0,0,0,1.000) 28px, #000 28px, #000 calc(100% - 28px), rgba(0,0,0,1.000) calc(100% - 28px), rgba(0,0,0,0.896) calc(100% - 22px), rgba(0,0,0,0.648) calc(100% - 17px), rgba(0,0,0,0.352) calc(100% - 11px), rgba(0,0,0,0.104) calc(100% - 6px), rgba(0,0,0,0.000) calc(100% - 0px)); }
+}
+@media (max-width:768px){ #panel .panel-topblur{ --tb-h:110px; } }
+@media (prefers-reduced-transparency:reduce){ #panel .panel-topblur .tb i{ display:none; } }
 </style>
 </head>
 <body>
@@ -1165,6 +1206,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
   <div id="panelShade" aria-hidden="true"></div>
   <div class="panel-inner" id="panelInner">
     <!-- 关闭键：一颗会"沿途变成玻璃"的按钮。起点在大标题那一行，随内容上滑，到顶后吸住，同时慢慢长出玻璃质感 -->
+    <div class="panel-topblur" aria-hidden="true"><div class="tb"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
     <div class="panel-head">
       <button type="button" class="panel-close" id="panelClose" aria-label="Close">
           <svg width="12" height="12" viewBox="0 0 12 12">
@@ -3825,10 +3867,21 @@ window._sceneState = {
   var hoveredIdx = -1;
 
   canvas.style.pointerEvents='all';
-  canvas.addEventListener('mousemove',function(e){
+  // [FIX 石头幽灵悬停] 原来只在 canvas 的 mousemove 里更新 mouse；面板打开后画布被遮住，
+  // mouse 永远停在「点击石头那一刻」的坐标。面板关闭 → 镜头回位 → 石头扫过这个过期坐标，
+  // 射线命中 → hoverT 拉满（高亮）、镜头移动时命中忽有忽无（闪烁），之后才慢慢恢复。
+  // 现在：1) 监听 window，始终跟踪真实指针；2) 只有「面板关闭后在画布上发生过真实移动」才允许悬停（_hoverArmed）。
+  var _hoverArmed = false;
+  function _hoverDisarm(){ _hoverArmed = false; mouse.set(-9,-9); }
+  function _trackPointer(e){
     mouse.x =  ((e.clientX + CANVAS_OVERHANG * 0.5) / CW) * 2 - 1;
     mouse.y = -(e.clientY/H)*2+1;
-  });
+    if(e.target === canvas) _hoverArmed = true;      // 指针在遮罩/面板上时不武装
+    else _hoverArmed = false;
+  }
+  window.addEventListener('mousemove', _trackPointer, {passive:true});
+  window.addEventListener('mousedown', _trackPointer, {passive:true});
+  document.addEventListener('mouseleave', _hoverDisarm);   // 指针离开窗口：清除悬停
   canvas.addEventListener('click',function(){
     if(_viewSuppressClick){ _viewSuppressClick = false; return; }
     if(isTouchDev && Date.now() - _lastTouchTapT < 800) return; // 触摸点击由 touchend 处理，避免重复/用到过期的 hoveredIdx
@@ -4003,6 +4056,7 @@ window._sceneState = {
       }
       mouse.x =  ((_tsx + CANVAS_OVERHANG * 0.5) / CW) * 2 - 1;
       mouse.y = -(_tsy / H) * 2 + 1;
+      _hoverArmed = true;
       // 快照此刻相机位置，touchend 里的 raycast 和屏幕投影都用同一套坐标
       _tsCamX = camera.position.x;
       _tsCamY = camera.position.y;
@@ -4247,10 +4301,14 @@ window._sceneState = {
   // ── Progressive image reveal ──
   // Skeleton shimmer on the slot until the image is FULLY loaded + decoded,
   // then blur → sharp crossfade (no more top-down partial rendering).
+  // 本次会话里「已经加载完」的图片：key = 原始 src。持有 Image 对象让浏览器把它留在内存缓存里，
+  // 再次打开同一个面板时：直接同步出图，不再出现骨架屏、不再排队逐张加载、不再淡入。
+  var _piKeep = {};
   function _bindProgressiveImages(root){
     root.querySelectorAll('img').forEach(function(img){
       if(img.dataset.pi) return;
       img.dataset.pi = '1';
+      var _piKey = img.getAttribute('data-src') || img.getAttribute('src') || '';
 
       // 1) Find / create the slot that hosts the shimmer
       var parent = img.parentElement, slot, wrapped = false;
@@ -4279,6 +4337,14 @@ window._sceneState = {
       img.classList.add('pi');
       if(slot.hasAttribute('data-lbidx')) img.classList.add('pi-flat');
 
+      if(_piKey && _piKeep[_piKey]){
+        // 已加载过：立刻显示，无骨架、无淡入
+        if(img.getAttribute('data-src')){ img.removeAttribute('data-src'); img.src = _thumbSrc(_piKey); }
+        img.classList.add('pi-in','pi-done');
+        if(wrapped) slot.classList.add('pi-ready');
+        return;
+      }
+
       var skel = document.createElement('div');
       skel.className = 'pi-skel';
       slot.insertBefore(skel, slot.firstChild);
@@ -4300,12 +4366,15 @@ window._sceneState = {
         // keep waiting for decode (as before) — only add a long safety net in case decode() hangs
         if(img.decode){ img.decode().then(reveal, reveal); setTimeout(reveal, 5000); } else { reveal(); }
       }
+      img.addEventListener('load', function(){
+        if(_piKey && !_piKeep[_piKey]){ try{ var _k = new Image(); _k.src = img.currentSrc || img.src; _piKeep[_piKey] = _k; }catch(_e){ _piKeep[_piKey] = 1; } }
+      }, {once:true});
       img.addEventListener('load', ready, {once:true});
       img.addEventListener('error', function(){
         if(skel.parentNode) skel.parentNode.removeChild(skel);
         img.classList.add('pi-in','pi-done');
       }, {once:true});
-      if(img.complete && img.naturalWidth) ready();
+      if(img.complete && img.naturalWidth){ if(_piKey && !_piKeep[_piKey]) _piKeep[_piKey] = 1; ready(); }
     });
   }
 
@@ -4599,6 +4668,7 @@ window._sceneState = {
     // Reset hover state immediately — cursor was enlarged on the crystal that was clicked,
     // panel covers the canvas so mousemove stops firing, state would stay stuck otherwise
     hoveredIdx = -1;
+    _hoverDisarm();                                          // 面板遮住画布，旧鼠标坐标作废
     document.body.classList.remove('hovering');
     // Reset lightbox meta each open — prevents unbounded accumulation across repeated opens
     _lbMeta = {};
@@ -4934,7 +5004,7 @@ window._sceneState = {
           // a single combined transform string. Writing scale here AND
           // translate in _plxTick to the same style.transform would make
           // each overwrite the other every frame — causing the flicker/jump.
-          _plx.titleScale = scale;
+          _plx.titleScale = 1.0; // 大标题不再随滚动缩小，只跟随鼠标位移
 
           if(_plx.active){
             // Parallax is running — let _plxTick compose the full transform.
@@ -4942,7 +5012,7 @@ window._sceneState = {
             _plx._lx = _plx.cx + 1; // invalidate last position → tick will write
           } else {
             // No parallax (mobile or panel just opened) — write directly
-            if(_panelTitle) _panelTitle.style.transform = 'translate3d(0,0,0) scale('+scale.toFixed(4)+')';
+            if(_panelTitle) _panelTitle.style.transform = 'translate3d(0,0,0) scale(1)';
           }
 
           // ── Close button: shrink with same progress curve, gentler range ──
@@ -5299,9 +5369,10 @@ window._sceneState = {
     if(!_plx.active) return;
     _plx.cx += (_plx.tx - _plx.cx) * 0.055;
     _plx.cy += (_plx.ty - _plx.cy) * 0.055;
-    var ex = _plx.cx * 3,  ey = _plx.cy * 2.2;
-    var tx = _plx.cx * 5,  ty = _plx.cy * 3.5;
+    // 眉标题 / 大标题 / 作品正文 共用同一组位移 → 整页像一张纸一起跟随鼠标，逻辑一致
     var bx = _plx.cx * 8,  by = _plx.cy * 5.5;
+    var ex = bx, ey = by;
+    var tx = bx, ty = by;
     var _moved = Math.abs(_plx.cx - _plx._lx) + Math.abs(_plx.cy - _plx._ly);
     if(_moved < 0.0008) return;
     _plx._lx = _plx.cx; _plx._ly = _plx.cy;
@@ -5357,6 +5428,7 @@ window._sceneState = {
     panelEl.classList.remove('on');
     document.body.classList.remove('panel-open');
     panelOpen = false;
+    _hoverDisarm();                                          // 关闭后必须等一次真实的鼠标移动才恢复悬停
     if(_burstCl) _burstClose(_burstXY);          // shrink back into the stone's position (captured before the camera snaps)
     // 明确结束聚焦目标，让 focusE 平滑回到 0；否则关闭面板后仍可能
     // 保留上一次点击的 focusCr，在特定角度造成镜头回位时轻微抽动。
@@ -7565,7 +7637,7 @@ resetIdleTimer();
     if(introsDone       && !_constellationReady) _constellationReady = true;
     if(_constellationReady && !_causticReady)    _causticReady       = true;
     raycaster.setFromCamera(mouse, camera);
-    var hits = (introsDone && !panelOpen) ? raycaster.intersectObjects(allMeshes, true) : [];   // 面板打开时画布被遮住，悬停检测无意义
+    var hits = (introsDone && !panelOpen && _hoverArmed && focusE <= 0.02) ? raycaster.intersectObjects(allMeshes, true) : [];   // focusE：镜头回位途中石头在移动，不做悬停检测，避免闪烁   // 面板打开时画布被遮住，悬停检测无意义
     var newHovered = -1;
     if(hits.length>0){
       crystals.forEach(function(cr,i){
@@ -11868,10 +11940,21 @@ document.addEventListener('keydown', e => {
     var m=parseFloat(getComputedStyle(head).marginTop)||0;
     var k=Math.max(0,Math.min(1,(inner.scrollTop-m-6)/90));
     head.style.setProperty('--p',(k*k*(3-2*k)).toFixed(3));
+    var t=Math.max(0,Math.min(1,inner.scrollTop/70));
+    inner.style.setProperty('--tb',(t*t*(3-2*t)).toFixed(3));
   }
   inner.addEventListener('scroll',function(){ if(!raf) raf=requestAnimationFrame(upd); },{passive:true});
-  new MutationObserver(function(){ if(!panel.classList.contains('on')) head.style.setProperty('--p','0'); })
-    .observe(panel,{attributes:true,attributeFilter:['class']});
+  // 关闭时不要立刻把 --tb / --p 归零：顶部的模糊 + 暗雾在 #panelInner 里，会跟着收回动画
+  // （圆形遮罩缩小 + 透明度淡出）一起退场；等动画完全结束（burst 收回约 .88s）后再悄悄复位。
+  var resetT=0;
+  new MutationObserver(function(){
+    clearTimeout(resetT);
+    if(panel.classList.contains('on')) return;
+    resetT=setTimeout(function(){
+      if(panel.classList.contains('on')) return;
+      head.style.setProperty('--p','0'); inner.style.setProperty('--tb','0');
+    },1200);
+  }).observe(panel,{attributes:true,attributeFilter:['class']});
 })();
 </script>
 </body>
