@@ -390,6 +390,10 @@ body.panel-open #three { transform:translateX(-3.5vw); }
   opacity:0; transition:opacity .52s cubic-bezier(.4,0,.2,1);
 }
 #panel.on .panel-bg { opacity:1; }
+/* 收回时场景压暗层的消退时长对齐 burst 收回(≈.88s)，不要比圆先退完 */
+@media (min-width:769px) and (prefers-reduced-motion:no-preference){
+  #panel.burst:not(.on) .panel-bg { transition:opacity .88s cubic-bezier(.4,0,.2,1); }
+}
 
 .panel-inner {
   position:absolute; top:0; right:0; bottom:0;
@@ -4507,8 +4511,23 @@ window._sceneState = {
       130);
   }
   function _burstClose(xy){
-    _burstRun(0, 560, function(k){ return k<.5 ? 4*k*k*k : 1 - Math.pow(-2*k+2, 3)/2; },
-      function(){ return xy; },
+    // 与 _burstOpen 对称：同一条余弦缓动、同样「圆心跟着石头走」、时长对齐镜头回位的弹簧(ω=4.8 ≈ 打开的 1050ms / 1.2)。
+    // 以前这里圆心钉在关闭瞬间的旧位置、只用 560ms，而镜头还要 ~1s 才回位 —— 圆收回去的时候石头早就不在那儿了。
+    var _cr0 = focusCr, _last = xy, _landed = false;
+    _burstRun(0, 880, function(k){ return 0.5 - 0.5 * Math.cos(Math.PI * k); },
+      function(){
+        var p = _cr0 ? _stoneXY(_cr0) : _last; _last = p;
+        // 圆收到石头上的那一刻，石头处回一圈很轻的余波（打开时是主波，收回时是尾波），像水面归于平静
+        if(!_landed && _bF < 0.16){
+          _landed = true;
+          var ss = window._sceneState;
+          if(ss && ss.shockWaves){
+            var big = Math.max(window.innerWidth, window.innerHeight);
+            ss.shockWaves.push({ x:p.x, y:p.y, radius:0, maxRadius:big*0.5, strength:0.4, speed:6.5, ca:0 });
+          }
+        }
+        return p;
+      },
       function(f){ return Math.sin(Math.PI * Math.min(1, f)) * 0.6; },
       function(){ _bInner.style.clipPath = ''; _burstClear(); _bRing.style.opacity = 0; _burstResetContent(); });
   }
