@@ -386,7 +386,7 @@ body.panel-open #three { transform:translateX(-3.5vw); }
 
 .panel-bg {
   position:absolute; inset:0;
-  background:rgba(4,3,2,.62);   /* [perf] 去掉全屏 backdrop-filter：它要对实时 WebGL 画布逐帧重采样 */
+  background:linear-gradient(to left,rgba(4,3,2,.62) 0%,rgba(4,3,2,.42) 55%,rgba(4,3,2,.26) 100%);   /* 左浅右深：抽屉一侧自然压暗 */ /* [perf] 去掉全屏 backdrop-filter：它要对实时 WebGL 画布逐帧重采样 */
   opacity:0; transition:opacity .52s cubic-bezier(.4,0,.2,1);
 }
 #panel.on .panel-bg { opacity:1; }
@@ -398,10 +398,8 @@ body.panel-open #three { transform:translateX(-3.5vw); }
   background:linear-gradient(175deg,rgba(18,17,15,.82) 0%,rgba(10,9,8,.88) 100%);
   /* [perf] 28px backdrop blur over the live WebGL canvas was re-computed every frame; panel is ~85% opaque so it was barely visible */
   background-color:rgba(10,9,8,.9);
-  border-left:1px solid rgba(196,154,82,.10);
-  box-shadow:-60px 0 120px rgba(0,0,0,.6);
   transform:translateX(102%);
-  transition:transform .52s cubic-bezier(.22,1,.36,1);
+  transition:transform .72s cubic-bezier(.16,1,.3,1);
   display:flex; flex-direction:column;
   will-change:transform;
 }
@@ -410,6 +408,58 @@ body.panel-open #three { transform:translateX(-3.5vw); }
 /* overflow-x:clip stops horizontal bleed without creating a new scroll container on Y,
    so the parallax body offset never gets clipped at the bottom edge */
 .panel-inner { overflow-x:clip; }
+
+/* ── PANEL BURST (desktop): the preview unfolds as a circle from the clicked stone ──
+   JS drives clip-path every frame (so the circle's centre can follow the stone while the camera flies).
+   Mobile keeps the bottom sheet; reduced-motion keeps the plain drawer. */
+@media (min-width:769px) and (prefers-reduced-motion:no-preference){
+  #panel.burst .panel-inner{ transform:none; transition:none; clip-path:circle(0px at 0px 50%); }
+  #panel.burst.on .panel-inner{ transform:none; }
+  /* content settles in like the water calming after the ripple: soft refocus + tiny rise, once, no fill after end */
+  #panel.burst.on .panel-head{ animation:burstSettle .8s cubic-bezier(.22,1,.36,1) .42s backwards; }
+  #panel.burst.on .panel-body{ animation:burstSettle .95s cubic-bezier(.22,1,.36,1) .5s backwards; }
+}
+@keyframes burstSettle{
+  from{ opacity:0; translate:0 14px; }
+  to  { opacity:1; translate:0 0; }
+}
+#burstRing{
+  display:none !important;
+  position:absolute; z-index:3; left:0; top:0; width:0; height:0; border-radius:50%;
+  /* colourless: the real distortion is the WebGL water ripple; this is only a faint glass-edge hint */
+  border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 0 28px rgba(255,255,255,.04), inset 0 0 28px rgba(255,255,255,.025);
+  pointer-events:none; opacity:0; contain:layout style;
+}
+
+/* ── PANEL SHADE — 抽屉的“底色”独立成一层，左边界是一条很长、很软的曲线渐变，而不是一条直线 ──
+   三个椭圆叠加 → 边缘有轻微起伏（像水面），每个椭圆的衰减用 smoothstep 采样，两端都是缓入缓出。
+   最右侧一块是纯色，保证抽屉主体（文字区）完全不透。 */
+#panelShade{
+  position:absolute; top:0; bottom:0; right:0; pointer-events:none;
+  width:calc(clamp(520px,72vw,1100px) + clamp(240px,31vw,480px));
+  background:
+    radial-gradient(ellipse 100% 175% at 100% 50%, rgba(10,9,8,0.960) 68.0%, rgba(10,9,8,0.942) 70.0%, rgba(10,9,8,0.891) 72.0%, rgba(10,9,8,0.814) 74.0%, rgba(10,9,8,0.719) 76.0%, rgba(10,9,8,0.613) 78.0%, rgba(10,9,8,0.503) 80.0%, rgba(10,9,8,0.395) 82.0%, rgba(10,9,8,0.295) 84.0%, rgba(10,9,8,0.208) 86.0%, rgba(10,9,8,0.136) 88.0%, rgba(10,9,8,0.080) 90.0%, rgba(10,9,8,0.041) 92.0%, rgba(10,9,8,0.017) 94.0%, rgba(10,9,8,0.005) 96.0%, rgba(10,9,8,0.000) 98.0%, rgba(10,9,8,0) 100%),
+    radial-gradient(ellipse 96% 70% at 100% 14%, rgba(10,9,8,0.960) 68.0%, rgba(10,9,8,0.942) 70.0%, rgba(10,9,8,0.891) 72.0%, rgba(10,9,8,0.814) 74.0%, rgba(10,9,8,0.719) 76.0%, rgba(10,9,8,0.613) 78.0%, rgba(10,9,8,0.503) 80.0%, rgba(10,9,8,0.395) 82.0%, rgba(10,9,8,0.295) 84.0%, rgba(10,9,8,0.208) 86.0%, rgba(10,9,8,0.136) 88.0%, rgba(10,9,8,0.080) 90.0%, rgba(10,9,8,0.041) 92.0%, rgba(10,9,8,0.017) 94.0%, rgba(10,9,8,0.005) 96.0%, rgba(10,9,8,0.000) 98.0%, rgba(10,9,8,0) 100%),
+    radial-gradient(ellipse 93% 78% at 100% 88%, rgba(10,9,8,0.960) 68.0%, rgba(10,9,8,0.942) 70.0%, rgba(10,9,8,0.891) 72.0%, rgba(10,9,8,0.814) 74.0%, rgba(10,9,8,0.719) 76.0%, rgba(10,9,8,0.613) 78.0%, rgba(10,9,8,0.503) 80.0%, rgba(10,9,8,0.395) 82.0%, rgba(10,9,8,0.295) 84.0%, rgba(10,9,8,0.208) 86.0%, rgba(10,9,8,0.136) 88.0%, rgba(10,9,8,0.080) 90.0%, rgba(10,9,8,0.041) 92.0%, rgba(10,9,8,0.017) 94.0%, rgba(10,9,8,0.005) 96.0%, rgba(10,9,8,0.000) 98.0%, rgba(10,9,8,0) 100%);
+  opacity:0; transform:translateX(40px); will-change:opacity,transform; contain:strict;
+  transition:opacity .75s cubic-bezier(.4,0,.2,1), transform .95s cubic-bezier(.16,1,.3,1);
+}
+#panel.on #panelShade{ opacity:1; transform:none; }
+@media (min-width:769px){
+  .panel-inner{ background:none !important; }
+  /* 顶部标题栏原来是一整块不透明矩形（左边是直线）：平时透明，滚动后才出现，并且左侧 44px 内淡出 */
+  .panel-head{ background:none !important; }
+  .panel-head::before{ content:''; position:absolute; inset:0; z-index:-1; pointer-events:none;
+    background:linear-gradient(to right,rgba(14,13,12,0) 0,rgba(14,13,12,.97) 44px);
+    opacity:0; transition:opacity .4s cubic-bezier(.4,0,.2,1); }
+  .panel-head.scrolled::before{ opacity:1; }
+}
+@media (max-width:768px){ #panelShade{ display:none; } }
+@media (min-width:769px) and (prefers-reduced-motion:no-preference){
+  /* burst 模式：和水波同一个遮罩、同一个半径，一起展开 */
+  #panel.burst #panelShade, #panel.burst.on #panelShade{ transition:none; opacity:var(--bf,0); transform:none; }
+}
 
 /* sticky header */
 /* All transitions share ONE duration + easing to avoid stagger jank.
@@ -1047,6 +1097,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 <!-- Panel drawer -->
 <div id="panel">
   <div class="panel-bg" id="panelBg"></div>
+  <div id="panelShade" aria-hidden="true"></div>
   <div class="panel-inner" id="panelInner">
     <div class="panel-head">
       <div class="panel-eyebrow" id="panelEye"></div>
@@ -1075,6 +1126,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
     </div>
     <div class="panel-body" id="panelBody"></div>
   </div>
+  <div id="burstRing"></div>
 </div>
 
 <div class="lb" id="lb">
@@ -3597,19 +3649,23 @@ window._sceneState = {
         if(focusE > 0.02 || _panelOpening) return;   // 镜头聚焦/回位途中不重复触发
         // Use crystal's actual 3D→screen projection — label is in corner, crystal is center-screen
         var sp = crystalScreenPos(cr);
-        if(window.burstCrystal) window.burstCrystal(sp.x, sp.y);
-        // Shock wave from corner crystal
-        window._sceneState.shockWaves.push({
-          x: sp.x, y: sp.y,
-          radius: 0,
-          maxRadius: Math.max(window.innerWidth, window.innerHeight) * 0.85,
-          strength: 1.0,
-        });
+        if(window.innerWidth >= 769 && window._stoneRipple){
+          window._stoneRipple(sp.x, sp.y);             // desktop: colourless water ripple only
+        } else {
+          if(window.burstCrystal) window.burstCrystal(sp.x, sp.y);
+          // Shock wave from corner crystal
+          window._sceneState.shockWaves.push({
+            x: sp.x, y: sp.y,
+            radius: 0,
+            maxRadius: Math.max(window.innerWidth, window.innerHeight) * 0.85,
+            strength: 1.0,
+          });
+          // Afterglow residual
+          var _gp = window._sceneState.glowPulses;
+          if(_gp.length >= 3) _gp.shift();
+          _gp.push({ x: sp.x, y: sp.y, alpha: 0.22 });
+        }
         if(window._crystalAfterWave) window._crystalAfterWave(sp.x, sp.y);
-        // Afterglow residual
-        var _gp = window._sceneState.glowPulses;
-        if(_gp.length >= 3) _gp.shift();
-        _gp.push({ x: sp.x, y: sp.y, alpha: 0.22 });
         if(navigator.vibrate) navigator.vibrate([18, 0, 8]);
         setCamFocus(cr);
         _openPanelNextFrame(sec);
@@ -3674,6 +3730,13 @@ window._sceneState = {
 
   // ── 点击石头后的「余波」：主波之后 0.3~0.6s 再放一圈很浅的折射环（无色散、更弱更慢更小），增加层次 ──
   // 与语言切换的余波同一套手法；着色器只取最新两圈，主波 + 余波正好占满两个槽位。
+  // Desktop click: a colourless water ripple (pure refraction, no chromatic split, no gold sparks / glow).
+  // Mobile keeps the original golden burst.
+  window._stoneRipple = function(x, y){
+    var ss = window._sceneState; if(!ss || !ss.shockWaves) return;
+    var big = Math.max(window.innerWidth, window.innerHeight);
+    ss.shockWaves.push({ x:x, y:y, radius:0, maxRadius:big * 0.95, strength:1.1, speed:19, ca:0 });
+  };
   window._crystalAfterWave = function(x, y){
     try{
       if(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -3715,17 +3778,22 @@ window._sceneState = {
       idleDriftAngle = 0;
 
       var sp = crystalScreenPos(crystals[hoveredIdx]);
-      if(window.burstCrystal) window.burstCrystal(sp.x, sp.y);
-      window._sceneState.shockWaves.push({
-        x: sp.x, y: sp.y,
-        radius: 0,
-        maxRadius: Math.max(W, H) * 0.85,
-        strength: 1.0,
-      });
-      window._crystalAfterWave(sp.x, sp.y);
-      var _gp = window._sceneState.glowPulses;
-      if(_gp.length >= 3) _gp.shift();
-      _gp.push({ x: sp.x, y: sp.y, alpha: 0.22 });
+      if(W >= 769 && window._stoneRipple){
+        window._stoneRipple(sp.x, sp.y);               // desktop: colourless water ripple only
+        window._crystalAfterWave(sp.x, sp.y);
+      } else {
+        if(window.burstCrystal) window.burstCrystal(sp.x, sp.y);
+        window._sceneState.shockWaves.push({
+          x: sp.x, y: sp.y,
+          radius: 0,
+          maxRadius: Math.max(W, H) * 0.85,
+          strength: 1.0,
+        });
+        window._crystalAfterWave(sp.x, sp.y);
+        var _gp = window._sceneState.glowPulses;
+        if(_gp.length >= 3) _gp.shift();
+        _gp.push({ x: sp.x, y: sp.y, alpha: 0.22 });
+      }
 
       // ── Mini stone pulse — small push to nearby stones on crystal click ──
       var _cw = new THREE.Vector3();
@@ -4361,6 +4429,69 @@ window._sceneState = {
     }catch(_e){}
   });
 
+  // ══════════════════════════════════════════════════════
+  // PANEL BURST — preview unfolds as a circle from the clicked stone (desktop)
+  // Set PANEL_BURST = false to go back to the plain right-side drawer.
+  // ══════════════════════════════════════════════════════
+  var PANEL_BURST = true;
+  var _bInner = document.getElementById('panelInner');
+  var _bRing  = document.getElementById('burstRing');
+  var _bMQ    = window.matchMedia('(min-width:769px) and (prefers-reduced-motion:no-preference)');
+  var _bShade = document.getElementById('panelShade');
+  var _bRAF = 0, _bF = 0, _bRect = null;           // _bF = current radius as a fraction (0..1) of the farthest panel corner
+  if(PANEL_BURST) panelEl.classList.add('burst');
+  function _burstOn(){ return PANEL_BURST && _bMQ.matches; }
+  function _stoneXY(cr){                            // same projection the labels use (canvas is wider than the viewport)
+    var p = new THREE.Vector3(); cr.group.getWorldPosition(p); p.project(camera);
+    return { x:(p.x*.5+.5)*CW - CANVAS_OVERHANG*.5, y:(-p.y*.5+.5)*H };
+  }
+  function _burstMax(x,y){
+    var r = _bRect;
+    var dx = Math.max(Math.abs(x-r.left), Math.abs(x-r.right));
+    var dy = Math.max(Math.abs(y-r.top),  Math.abs(y-r.bottom));
+    return Math.sqrt(dx*dx + dy*dy) + 4;
+  }
+  var _B_FEATHER = 170;                              // px of soft edge on the reveal front (water-like, not a hard cut)
+  function _burstMask(x, y, R){
+    var F = Math.min(_B_FEATHER, R * 0.6), inner = Math.max(0, R - F);
+    function grad(cx, cy){ return 'radial-gradient(circle at ' + cx.toFixed(1) + 'px ' + cy.toFixed(1) + 'px, #000 ' + inner.toFixed(1) + 'px, rgba(0,0,0,0) ' + R.toFixed(1) + 'px)'; }
+    var g = grad(x, y);
+    _bInner.style.webkitMaskImage = g; _bInner.style.maskImage = g;
+    return F;
+  }
+  function _burstClear(){
+    _bInner.style.webkitMaskImage = ''; _bInner.style.maskImage = '';
+  }
+  function _burstRun(toF, ms, ease, getXY, ringK, done, delay){
+    cancelAnimationFrame(_bRAF);
+    var f0 = _bF, t0 = performance.now() + (delay || 0);
+    _bRect = _bInner.getBoundingClientRect();
+    _bInner.style.clipPath = 'none';                 // CSS starts hidden via clip-path; from here the soft mask does the revealing
+    (function step(now){
+      var k = Math.max(0, Math.min(1, (now - t0) / ms));
+      _bF = f0 + (toF - f0) * ease(k);
+      var c = getXY(), R = (_burstMax(c.x, c.y) + _B_FEATHER) * _bF;
+      var F = _burstMask(c.x - _bRect.left, c.y - _bRect.top, R);
+      var _e = Math.max(0, Math.min(1, (_bF - 0.05) / 0.7)); if(_bShade) _bShade.style.opacity = (_e*_e*(3-2*_e)).toFixed(3);   // 左侧暗部只做淡入淡出（合成层，不重绘）
+      if(k < 1 || now < t0) _bRAF = requestAnimationFrame(step); else done();
+    })(performance.now());
+  }
+  function _burstOpen(){
+    var fallback = { x:_bInner.getBoundingClientRect().left, y:window.innerHeight/2 };
+    // The WebGL ripple (fired on click) leads; the preview unfolds in its wake: short delay, slow-in/slow-out so the edge never outruns the wave.
+    _burstRun(1, 1050, function(k){ return 0.5 - 0.5 * Math.cos(Math.PI * k); },
+      function(){ return focusCr ? _stoneXY(focusCr) : fallback; },       // centre follows the stone while the camera flies
+      function(f){ return Math.sin(Math.PI * Math.min(1, f)) * 0.6; },
+      function(){ _bInner.style.clipPath = 'none'; _burstClear(); _bRing.style.opacity = 0; },
+      130);
+  }
+  function _burstClose(xy){
+    _burstRun(0, 560, function(k){ return k<.5 ? 4*k*k*k : 1 - Math.pow(-2*k+2, 3)/2; },
+      function(){ return xy; },
+      function(f){ return Math.sin(Math.PI * Math.min(1, f)) * 0.6; },
+      function(){ _bInner.style.clipPath = ''; _burstClear(); _bRing.style.opacity = 0; });
+  }
+
   function openPanel(sec){
     _curSec = sec;                                           // 记住「原始」数据，不是 localize 后的副本
     if(window.I18N){ try{ sec = window.I18N.localize(sec); }catch(_e){} }
@@ -4631,8 +4762,11 @@ window._sceneState = {
     _bindImageCaps(panelBody);
     _bindProgressiveImages(panelBody);
     _deferGridImages(panelBody);
+    var _burstGo = _burstOn() && !panelOpen;      // not when the panel is merely re-rendered (e.g. language switch)
     panelOpen = true;
     panelEl.classList.add('on');
+    if(!_burstOn() && _bShade) _bShade.style.opacity = '';   // 非 burst 模式交回 CSS 控制
+    if(_burstGo) _burstOpen();
     document.body.classList.add('panel-open');
     _panelOpenedAt = Date.now();
     _plxStart(); // start content parallax — desktop only, noop on mobile
@@ -5116,9 +5250,12 @@ window._sceneState = {
     // 灯箱开着（或刚被同一次 Esc 关掉）时，只关灯箱，不连带关面板
     if(document.getElementById('lb').classList.contains('on') || Date.now() - (window._lbClosedAt || 0) < 120) return;
     _plxStop(); // stop content parallax and reset transforms
+    var _burstCl = _burstOn() && panelEl.classList.contains('on');
+    var _burstXY = _burstCl ? (focusCr ? _stoneXY(focusCr) : {x:_bInner.getBoundingClientRect().left, y:window.innerHeight/2}) : null;
     panelEl.classList.remove('on');
     document.body.classList.remove('panel-open');
     panelOpen = false;
+    if(_burstCl) _burstClose(_burstXY);          // shrink back into the stone's position (captured before the camera snaps)
     // 明确结束聚焦目标，让 focusE 平滑回到 0；否则关闭面板后仍可能
     // 保留上一次点击的 focusCr，在特定角度造成镜头回位时轻微抽动。
     setCamFocus(null);
@@ -6767,11 +6904,12 @@ resetIdleTimer();
           if(rp.w > 0.001){
             vec2  d  = (vUv - rp.xy) * asp;
             float r  = length(d);
-            float wd = 0.035 + 0.075 * rp.z;
+            // 水波剖面：前沿一道主波峰 + 身后 2~3 圈逐渐衰减的余波（x<0 在波前内侧，衰减更慢），像水面被扰动后慢慢平复
+            float wd = 0.05 + 0.10 * rp.z;
             float x  = (r - rp.z) / wd;
-            float ring = exp(-x * x);
+            float ring = sin(x * 2.1) * exp(-x * x * ((x > 0.0) ? 1.1 : 0.16));
             vec2  dir  = (r > 1e-4) ? d / r : vec2(0.0);
-            vec2  push = dir / asp * (-x * ring) * rp.w * 0.030;
+            vec2  push = dir / asp * (-ring) * rp.w * 0.026;
             suv   += push;
             ripCA += push * 0.55 * ((i == 0) ? uRipCA.x : uRipCA.y);
           }
