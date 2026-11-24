@@ -1142,7 +1142,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
    8 层极轻的 backdrop-filter（最大 4.5px），各自用渐变遮罩错开，叠出连续的朦胧感；
    高度随滚动由 --tb(0→1) 长出来，停在顶部时不存在。 */
 #panel .panel-topblur{ position:sticky; top:0; z-index:5; flex:none; align-self:stretch; height:0; pointer-events:none; --tb-h:130px; }
-#panel .panel-topblur .tb{ position:absolute; left:0; right:0; top:0; height:calc(var(--tb,0) * var(--tb-h)); pointer-events:none; }
+#panel .panel-topblur .tb{ position:absolute; left:var(--tb-x,0px); width:var(--tb-w,100%); right:auto; top:0; height:calc(var(--tb,0) * var(--tb-h)); pointer-events:none; }
 #panel .panel-topblur .tb i{ position:absolute; inset:0; }
 #panel .panel-topblur .tb i:nth-child(1){ -webkit-backdrop-filter:blur(0.3px); backdrop-filter:blur(0.3px); --mv:linear-gradient(to top,transparent 0%,#000 10.0%,#000 20.0%,transparent 30.0%); }
 #panel .panel-topblur .tb i:nth-child(2){ -webkit-backdrop-filter:blur(0.7px); backdrop-filter:blur(0.7px); --mv:linear-gradient(to top,transparent 10.0%,#000 20.0%,#000 30.0%,transparent 40.0%); }
@@ -1171,7 +1171,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 }
 /* x 方向拉长：暗雾的左右羽化变短（左 150→110px，右 20→10px），横向覆盖更宽、与图片边缘对齐；仅桌面端，手机端沿用 --mh */
 @media (min-width:769px){
-  #panel .panel-topblur .tb{ --mh2:linear-gradient(to right, rgba(0,0,0,0.000) 0px, rgba(0,0,0,0.028) 11px, rgba(0,0,0,0.104) 22px, rgba(0,0,0,0.216) 33px, rgba(0,0,0,0.352) 44px, rgba(0,0,0,0.500) 55px, rgba(0,0,0,0.648) 66px, rgba(0,0,0,0.784) 77px, rgba(0,0,0,0.896) 88px, rgba(0,0,0,0.972) 99px, rgba(0,0,0,1.000) 110px, #000 110px, #000 calc(100% - 10px), rgba(0,0,0,1.000) calc(100% - 10px), rgba(0,0,0,0.972) calc(100% - 9px), rgba(0,0,0,0.896) calc(100% - 8px), rgba(0,0,0,0.784) calc(100% - 7px), rgba(0,0,0,0.648) calc(100% - 6px), rgba(0,0,0,0.500) calc(100% - 5px), rgba(0,0,0,0.352) calc(100% - 4px), rgba(0,0,0,0.216) calc(100% - 3px), rgba(0,0,0,0.104) calc(100% - 2px), rgba(0,0,0,0.028) calc(100% - 1px), rgba(0,0,0,0.000) calc(100% - 0px)); }
+  #panel .panel-topblur .tb{ --mh2:linear-gradient(to right, rgba(0,0,0,0.000) 0px, rgba(0,0,0,0.028) 3px, rgba(0,0,0,0.104) 6px, rgba(0,0,0,0.216) 9px, rgba(0,0,0,0.352) 12px, rgba(0,0,0,0.500) 15px, rgba(0,0,0,0.648) 18px, rgba(0,0,0,0.784) 21px, rgba(0,0,0,0.896) 24px, rgba(0,0,0,0.972) 27px, rgba(0,0,0,1.000) 30px, #000 30px, #000 calc(100% - 30px), rgba(0,0,0,1.000) calc(100% - 0px), rgba(0,0,0,0.972) calc(100% - 3px), rgba(0,0,0,0.896) calc(100% - 6px), rgba(0,0,0,0.784) calc(100% - 9px), rgba(0,0,0,0.648) calc(100% - 12px), rgba(0,0,0,0.500) calc(100% - 15px), rgba(0,0,0,0.352) calc(100% - 18px), rgba(0,0,0,0.216) calc(100% - 21px), rgba(0,0,0,0.104) calc(100% - 24px), rgba(0,0,0,0.028) calc(100% - 27px), rgba(0,0,0,0.000) calc(100% - 30px)); --mh:linear-gradient(to right, rgba(0,0,0,0.000) 0px, rgba(0,0,0,0.028) 3px, rgba(0,0,0,0.104) 6px, rgba(0,0,0,0.216) 9px, rgba(0,0,0,0.352) 12px, rgba(0,0,0,0.500) 15px, rgba(0,0,0,0.648) 18px, rgba(0,0,0,0.784) 21px, rgba(0,0,0,0.896) 24px, rgba(0,0,0,0.972) 27px, rgba(0,0,0,1.000) 30px, #000 30px, #000 calc(100% - 30px), rgba(0,0,0,1.000) calc(100% - 0px), rgba(0,0,0,0.972) calc(100% - 3px), rgba(0,0,0,0.896) calc(100% - 6px), rgba(0,0,0,0.784) calc(100% - 9px), rgba(0,0,0,0.648) calc(100% - 12px), rgba(0,0,0,0.500) calc(100% - 15px), rgba(0,0,0,0.352) calc(100% - 18px), rgba(0,0,0,0.216) calc(100% - 21px), rgba(0,0,0,0.104) calc(100% - 24px), rgba(0,0,0,0.028) calc(100% - 27px), rgba(0,0,0,0.000) calc(100% - 30px)); }
 }
 @media (max-width:768px){
   #panel .panel-topblur .tb{ --mh:linear-gradient(to right, rgba(0,0,0,0.000) 0px, rgba(0,0,0,0.104) 6px, rgba(0,0,0,0.352) 11px, rgba(0,0,0,0.648) 17px, rgba(0,0,0,0.896) 22px, rgba(0,0,0,1.000) 28px, #000 28px, #000 calc(100% - 28px), rgba(0,0,0,1.000) calc(100% - 28px), rgba(0,0,0,0.896) calc(100% - 22px), rgba(0,0,0,0.648) calc(100% - 17px), rgba(0,0,0,0.352) calc(100% - 11px), rgba(0,0,0,0.104) calc(100% - 6px), rgba(0,0,0,0.000) calc(100% - 0px)); }
@@ -12147,7 +12147,26 @@ document.addEventListener('keydown', e => {
     head.style.setProperty('--p',(k*k*(3-2*k)).toFixed(3));
     var t=Math.max(0,Math.min(1,inner.scrollTop/70));
     inner.style.setProperty('--tb',(t*t*(3-2*t)).toFixed(3));
+    fitFog();
   }
+  // 黑幕横向范围 = 当前预览页所有图片的最左到最右（并排两张就是两张加起来的总宽），两侧各外扩 24px
+  function fitFog(){
+    var tb=inner.querySelector('.panel-topblur .tb'); if(!tb) return;
+    if(window.innerWidth<=768){ tb.style.removeProperty('--tb-x'); tb.style.removeProperty('--tb-w'); return; }
+    var imgs=inner.querySelectorAll('#panelBody [data-lbidx]');
+    var ir=inner.getBoundingClientRect(), l=Infinity, r=-Infinity;
+    for(var k=0;k<imgs.length;k++){
+      var b=imgs[k].getBoundingClientRect();
+      if(!b.width) continue;
+      if(b.left<l) l=b.left; if(b.right>r) r=b.right;
+    }
+    if(!isFinite(l)){ tb.style.removeProperty('--tb-x'); tb.style.removeProperty('--tb-w'); return; }
+    var pad=24, x=Math.max(0,l-ir.left-pad), w=Math.min(ir.width-x, r-l+pad*2);
+    tb.style.setProperty('--tb-x',x.toFixed(1)+'px'); tb.style.setProperty('--tb-w',w.toFixed(1)+'px');
+  }
+  window.addEventListener('resize',fitFog);
+  var pb=document.getElementById('panelBody');
+  if(pb) new MutationObserver(function(){ requestAnimationFrame(fitFog); }).observe(pb,{childList:true});
   inner.addEventListener('scroll',function(){ if(!raf) raf=requestAnimationFrame(upd); },{passive:true});
   // 关闭时不要立刻把 --tb / --p 归零：顶部的模糊 + 暗雾在 #panelInner 里，会跟着收回动画
   // （圆形遮罩缩小 + 透明度淡出）一起退场；等动画完全结束（burst 收回约 .88s）后再悄悄复位。
