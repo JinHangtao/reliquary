@@ -1185,12 +1185,6 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
   #panel .panel-inner{ overscroll-behavior-y:contain; }   /* 顶部下拉不再触发浏览器自带的回弹/刷新，把手势留给抽屉 */
 }
 @media (prefers-reduced-transparency:reduce){ #panel .panel-topblur .tb i{ display:none; } }
-
-/* ── 堆叠翻页：每张图滚到顶部时吸住，下一张从下方盖上来（仅桌面端；两列时每一行为一“张”） ── */
-@media (min-width:769px){
-  #panelBody [data-lbidx]{ position:sticky !important; top:96px; transform-origin:50% 0; }
-  #panelBody .stk-dim{ position:absolute; inset:0; z-index:6; pointer-events:none; opacity:0; background:#050403; border-radius:inherit; }
-}
 </style>
 </head>
 <body>
@@ -12167,8 +12161,7 @@ document.addEventListener('keydown', e => {
   function fitFog(){
     var tb=inner.querySelector('.panel-topblur .tb'); if(!tb) return;
     if(window.innerWidth<=768){ tb.style.removeProperty('--tb-x'); tb.style.removeProperty('--tb-w'); return; }
-    var imgs=[], seen=[], all=inner.querySelectorAll('#panelBody [data-lbidx]');
-    for(var q=0;q<all.length;q++){ var pe=all[q].parentElement; if(seen.indexOf(pe)<0){ seen.push(pe); imgs.push(pe); } }   // 用网格容器（不受卷轴缩放影响）
+    var imgs=inner.querySelectorAll('#panelBody [data-lbidx]');
     var ir=inner.getBoundingClientRect(), l=Infinity, r=-Infinity, ox=(window._plxOff&&window._plxOff.x)||0;
     for(var k=0;k<imgs.length;k++){
       var b=imgs[k].getBoundingClientRect();
@@ -12194,59 +12187,6 @@ document.addEventListener('keydown', e => {
       head.style.setProperty('--p','0'); inner.style.setProperty('--tb','0');
     },1200);
   }).observe(panel,{attributes:true,attributeFilter:['class']});
-})();
-</script>
-
-<script>
-/* ── 对焦转移（rack focus）：吸顶叠放 + 摄影式的焦点切换，而不是缩小/变暗的“叠卡片”套路 ──
-   · 被后一张盖住的图：焦点被拉走 → 渐渐失焦(blur)、褪色、略沉；
-   · 新进入的图：从画面下方进来时是虚的，走到顶部那一刻刚好“对上焦”。
-   只改 filter 和一层暗幕，不碰 transform / rotate（悬停倾斜、灯箱不受影响）；静止的图完全没有滤镜，零开销。 */
-(function(){
-  var inner=document.getElementById('panelInner'), body=document.getElementById('panelBody');
-  if(!inner||!body) return;
-  if(window.matchMedia('(prefers-reduced-motion:reduce)').matches) return;
-  var BLUR_OUT=7, BLUR_IN=6, SAT_DROP=.55, MAX_DIM=.5, STICKY=96, raf=0, items=[], steps=[], dims=[];
-  function enabled(){ return window.innerWidth>768 && !window._lbOpen && !window._lbFlying; }
-  function collect(){
-    items=[].slice.call(body.querySelectorAll('[data-lbidx]')); steps=[]; dims=[];
-    items.forEach(function(el){
-      var d=el.querySelector('.stk-dim'); if(!d){ d=document.createElement('div'); d.className='stk-dim'; el.appendChild(d); }
-      dims.push(d);
-      steps.push(el.parentElement && el.parentElement.style.display==='grid' ? 2 : 1);
-    });
-  }
-  function reset(i){ items[i].style.filter=''; items[i].style.rotate=''; items[i].style.scale=''; dims[i].style.opacity=0; }
-  function clear(){ for(var i=0;i<items.length;i++) reset(i); }
-  function run(){
-    raf=0;
-    if(!enabled()){ clear(); return; }
-    var ir=inner.getBoundingClientRect(), i, tops=[], p, e, nx, q, f, blur, sat, pinY=ir.top+STICKY;
-    for(i=0;i<items.length;i++) tops.push(items[i].getBoundingClientRect().top);   // 先读后写
-    var lowStart=ir.top+ir.height*.6, lowSpan=ir.height*.4+STICKY*0;
-    for(i=0;i<items.length;i++){
-      // ① 被盖住 → 失焦
-      p=0; nx=i+steps[i];
-      if(nx<items.length && tops[i]<=pinY+2){
-        p=1-(tops[nx]-tops[i])/(items[i].offsetHeight+10); p=Math.max(0,Math.min(1,p));
-      }
-      e=p*p*(3-2*p);
-      // ② 从下方进入 → 由虚到实（仅在画面下 40% 区域内）
-      q=(tops[i]-lowStart)/lowSpan; q=Math.max(0,Math.min(1,q)); f=q*q*(3-2*q);
-      blur=BLUR_OUT*e+BLUR_IN*f;
-      if(blur<.15 && e<.002){ reset(i); continue; }
-      sat=1-SAT_DROP*e;
-      items[i].style.filter='blur('+blur.toFixed(2)+'px) saturate('+sat.toFixed(3)+')';
-      items[i].style.scale=(1-.02*e).toFixed(4);     // 只留一丝“退后”的呼吸，不再是明显的缩小
-      dims[i].style.opacity=(MAX_DIM*e).toFixed(3);
-    }
-  }
-  function req(){ if(!raf) raf=requestAnimationFrame(run); }
-  inner.addEventListener('scroll',req,{passive:true});
-  window.addEventListener('resize',req);
-  new MutationObserver(function(){ collect(); req(); setTimeout(req,350); }).observe(body,{childList:true});
-  new MutationObserver(req).observe(document.getElementById('panel'),{attributes:true,attributeFilter:['class']});
-  collect(); req();
 })();
 </script>
 </body>
