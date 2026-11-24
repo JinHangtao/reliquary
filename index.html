@@ -1186,6 +1186,18 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 }
 @media (prefers-reduced-transparency:reduce){ #panel .panel-topblur .tb i{ display:none; } }
 </style>
+
+<style id="gx-css">
+/* ── 作品预览页：策展式排布 + 景深聚焦 + 手电筒显影 ── */
+#panelBody .gx-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:14px;row-gap:34px;align-items:start;margin-top:28px;padding-bottom:30px}
+#panelBody .gx-card{grid-column:span var(--span,12);margin-top:var(--off,0px);will-change:scale,translate,rotate;box-shadow:0 34px 70px -28px rgba(0,0,0,.9),0 10px 24px -14px rgba(0,0,0,.6)}
+#panelBody .gx-card img{object-position:center !important}
+@media (max-width:900px){ #panelBody .gx-card{grid-column:span var(--s2,12)} }
+@media (max-width:768px){
+  #panelBody .gx-grid{grid-template-columns:1fr;row-gap:14px}
+  #panelBody .gx-card{grid-column:1/-1;margin-top:0}
+}
+</style>
 </head>
 <body>
 
@@ -4886,17 +4898,29 @@ window._sceneState = {
     // ── image grid ──
     if(sec.images && sec.images.length){
       var isTwoCol = sec.id === 'painting' || sec.id === 'stmt';
-      var gridStyle = isTwoCol
-        ? 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:28px'
-        : 'display:flex;flex-direction:column;gap:10px;margin-top:28px';
+      // 策展式排布：首张通栏主图，其后 7/5、5/7、4/4/4 交替，同一行内作品错位下沉；窄屏自动降级
+      var _gxPlan = (function(n){
+        var T = [[12],[7,5],[5,7],[4,4,4],[8,4],[12],[4,8],[6,6]], out = [], ti = 0;
+        if(n === 1) return [[12,12,0]];
+        while(out.length < n){
+          var row = T[ti++ % T.length], left = n - out.length;
+          if(left < row.length) row = left === 1 ? [12] : (left === 2 ? [7,5] : [4,4,4]);
+          var offs = row.length === 1 ? [0] : row.length === 2 ? [0,56] : [0,64,22];
+          row.forEach(function(sp, k){
+            var s2 = sp >= 8 ? 12 : (row.length === 3 ? (k === 2 ? 12 : 6) : sp);
+            out.push([sp, s2, offs[k]]);
+          });
+        }
+        return out;
+      })(sec.images.length);
 
-      html += '<div style="'+gridStyle+'">';
+      html += '<div class="gx-grid">';
       sec.images.forEach(function(img, imgIdx){
         var lbIdx = sec.id + '_' + imgIdx;
         _lbMeta[lbIdx] = { title: img.cn, en: img.en, desc: img.desc || '' };
         var ratio = isTwoCol ? '3/4' : '16/9';
-        html += '<div data-lbidx="'+esc(lbIdx)+'" data-lbsrc="'+esc(img.src)+'" data-tilt data-cap onclick="openLb(\''+esc(lbIdx)+'\')" '
-          + 'style="position:relative;overflow:hidden;border-radius:11px;aspect-ratio:'+ratio+';background:#0e0d0c;border:1px solid #1e1c1a;cursor:none;">'
+        html += '<div class="gx-card" data-lbidx="'+esc(lbIdx)+'" data-lbsrc="'+esc(img.src)+'" data-tilt data-cap onclick="openLb(\''+esc(lbIdx)+'\')" '
+          + 'style="--span:'+_gxPlan[imgIdx][0]+';--s2:'+_gxPlan[imgIdx][1]+';--off:'+_gxPlan[imgIdx][2]+'px;position:relative;overflow:hidden;border-radius:11px;aspect-ratio:'+ratio+';background:#0e0d0c;border:1px solid #1e1c1a;cursor:none;">'
           + '<img data-src="'+esc(img.src)+'" decoding="async" style="width:100%;height:100%;object-fit:cover;object-position:top;display:block;transition:filter .4s ease;filter:brightness(.78) saturate(.62) contrast(1.06);pointer-events:none">'
           // shine overlay — follows mouse as a radial gradient hotspot
           + '<div class="gi-shine" style="position:absolute;inset:0;pointer-events:none;border-radius:11px;opacity:0;transition:opacity .35s ease;background:radial-gradient(circle at 50% 50%, rgba(255,240,190,.13) 0%, transparent 65%);"></div>'
@@ -12187,6 +12211,71 @@ document.addEventListener('keydown', e => {
       head.style.setProperty('--p','0'); inner.style.setProperty('--tb','0');
     },1200);
   }).observe(panel,{attributes:true,attributeFilter:['class']});
+})();
+</script>
+
+<script>
+/* 作品预览页：景深聚焦 + 手电筒显影 + 按真实比例显示 */
+(function(){
+  var inner=document.getElementById('panelInner'), body=document.getElementById('panelBody'), panel=document.getElementById('panel');
+  if(!inner||!body||!panel) return;
+  var reduce=window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var cards=[], raf=0, mx=-9999, my=-9999;
+  function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+  function fitRatio(card){
+    var im=card.querySelector('img');
+    if(im && im.naturalWidth) card.style.aspectRatio=im.naturalWidth+'/'+im.naturalHeight;
+  }
+  function collect(){
+    cards=[].slice.call(body.querySelectorAll('.gx-card')).map(function(el,i){
+      fitRatio(el);
+      return {el:el, img:el.querySelector('img'), lit:.35, sc:.95, ty:0, ap:0, ph:i*1.9+.7, sp:.55+((i*3)%4)*.11, k:.04+((i*7)%5)*.012, w:''};
+    });
+    kick();
+  }
+  function kick(){ if(!raf) raf=requestAnimationFrame(tick); }
+  function tick(){
+    raf=0;
+    if(!panel.classList.contains('on')||!cards.length) return;
+    var vh=window.innerHeight, vc=vh*.52, busy=false, narrow=window.innerWidth<=768;
+    for(var i=0;i<cards.length;i++){
+      var c=cards[i], r=c.el.getBoundingClientRect();
+      if(r.bottom<-250||r.top>vh+250) continue;
+      var cy=r.top+r.height/2-c.ap;
+      var f=clamp(1-Math.abs(cy-vc)/(vh*.62),0,1); f=f*f*(3-2*f);
+      var ml=0;
+      if(!narrow && mx>-1000){
+        var dx=Math.max(r.left-mx,0,mx-r.right), dy=Math.max(r.top-my,0,my-r.bottom);
+        ml=clamp(1-Math.hypot(dx,dy)/280,0,1); ml=ml*ml*(3-2*ml);
+      }
+      var tl=reduce?1:Math.max(f*.82,ml), ts=reduce?1:.945+.055*f, tt=(reduce||narrow)?0:clamp((cy-vc)*c.k,-70,70);
+      c.lit+=(tl-c.lit)*.14; c.sc+=(ts-c.sc)*.14; c.ty+=(tt-c.ty)*.14;
+      if(Math.abs(tl-c.lit)>.003||Math.abs(ts-c.sc)>.0008||Math.abs(tt-c.ty)>.15) busy=true;
+      if(c.img){
+        var w='brightness('+(.5+.5*c.lit).toFixed(3)+') saturate('+(.4+.6*c.lit).toFixed(3)+') contrast(1.05)';
+        if(w!==c.w){ c.w=w; c.img.style.setProperty('--pi-f',w); }
+      }
+      // 漂浮：每张作品相位、速度各不相同，缓慢上下浮动并轻微摇摆
+      var fy=0, fr=0;
+      if(!reduce){ var tm=performance.now()/1000; fy=Math.sin(tm*c.sp+c.ph)*7; fr=Math.sin(tm*c.sp*.7+c.ph*1.3)*.45; }
+      c.ap=c.ty+fy;
+      c.el.style.scale=c.sc.toFixed(4);
+      c.el.style.translate='0 '+c.ap.toFixed(2)+'px';
+      c.el.style.rotate=fr.toFixed(3)+'deg';
+    }
+    if(busy||!reduce) kick();
+  }
+  inner.addEventListener('scroll',kick,{passive:true});
+  panel.addEventListener('pointermove',function(e){ if(e.pointerType==='touch') return; mx=e.clientX; my=e.clientY; kick(); },{passive:true});
+  panel.addEventListener('pointerleave',function(){ mx=my=-9999; kick(); });
+  window.addEventListener('resize',kick);
+  body.addEventListener('load',function(e){
+    var im=e.target; if(!im||im.tagName!=='IMG') return;
+    var card=im.closest&&im.closest('.gx-card'); if(card){ fitRatio(card); kick(); }
+  },true);
+  new MutationObserver(function(){ requestAnimationFrame(collect); }).observe(body,{childList:true});
+  new MutationObserver(kick).observe(panel,{attributes:true,attributeFilter:['class']});
+  collect();
 })();
 </script>
 </body>
