@@ -9893,9 +9893,16 @@ function closeLb(){
   document.body.style.overflow = '';
   if(_lbCloseTmr){ clearTimeout(_lbCloseTmr); _lbCloseTmr = null; }
   // 等飞回动画（含落地交接）完成后再重置样式
-  _lbCloseTmr = setTimeout(function(){
+  var _cleanT0 = Date.now();
+  var _cleanFn = function(){
     _lbCloseTmr = null;
     if(_lbIsOn) return;             // 期间又打开了，绝不能把新图清掉
+    // 飞回 = 预热(等解码,最长~190ms) + 飞行300ms + 落地交接。_resetDelay 是固定值，预热偏长时会先于飞回结束触发，
+    // 清理会在半空/交接中途删掉飞行层并还原缩略图 → 偶发闪烁。所以必须等飞行与交接真正结束再清（最多等 2.5s 兜底）。
+    if((window._lbFlying || _lbTail) && Date.now() - _cleanT0 < 2500){
+      _lbCloseTmr = setTimeout(_cleanFn, 40);
+      return;
+    }
     document.getElementById('lb').style.visibility = 'hidden';   // 立即隐藏：.lb 的 visibility 过渡有 .78s 延迟，期间重置后的空卡片会露出来
     Array.prototype.forEach.call(document.querySelectorAll('.lb-fly-proxy'), function(n){ if(n.parentNode) n.parentNode.removeChild(n); });
     var img    = document.getElementById('lbImg');
@@ -9914,7 +9921,8 @@ function closeLb(){
     if(wrapEl) { wrapEl.style.transition=''; wrapEl.style.transform=''; wrapEl.style.opacity=''; }
     if(sideEl) { sideEl.style.opacity='0'; sideEl.style.position=''; sideEl.style.transform=''; sideEl.style.left=''; sideEl.style.top=''; sideEl.style.width=''; sideEl.style.marginTop=''; }
     if(btns) btns.style.opacity = '0';
-  }, _resetDelay);
+  };
+  _lbCloseTmr = setTimeout(_cleanFn, _resetDelay);
 }
 
 // 兼容旧调用：取消 closeLb 的延迟清理
@@ -12305,6 +12313,7 @@ document.addEventListener('keydown', e => {
   if(!inner||!body||!panel) return;
   var reduce=window.matchMedia('(prefers-reduced-motion:reduce)').matches;
   var cards=[], raf=0, mx=-9999, my=-9999, pressCard=null, pressT=0, geoDirty=true, lastFrozen=false;
+  var lastPtr='mouse', settleEl=null, openPending=false;   // 触屏：按下不回正；点按打开时才用一小段柔和过渡回正
   var STATIC_F='brightness(1) saturate(.8) contrast(1.05)';
   function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
   function fitRatio(card){
@@ -12374,7 +12383,7 @@ document.addEventListener('keydown', e => {
       var vis=!(cy+c.h/2<-vh*.7||cy-c.h/2>vh*1.7);
       if(!vis){ if(c.wc){ c.el.style.willChange=''; c.wc=false; } continue; }
       if(!c.wc){ c.el.style.willChange='scale,translate,rotate'; c.wc=true; }
-      var pressed=(pressCard===c.el&&now-pressT<1600), frozen=(curEl===c.el);
+      var pressed=(pressCard===c.el&&now-pressT<1600), frozen=(curEl===c.el), settling=(settleEl===c.el);
       var held=(now<holdUntil&&c.el===lastCur);
       var f=clamp(1-Math.abs(cy-vc)/(vh*.62),0,1); f=f*f*(3-2*f);
       var ml=0, inside=false;
@@ -12389,8 +12398,8 @@ document.addEventListener('keydown', e => {
       // ── 「回正程度」hv：0=漂浮倾斜，1=完全回正。两级串联平滑 → S 形曲线（起步柔、收尾柔）
       //    悬停回正约 0.4s；松开 / 灯箱回来后恢复漂浮约 1.1s；点击按下仍然很快（灯箱要量真实矩形）
       if(c.snap&&!frozen&&!held) c.snap=false;
-      var calmT=(reduce||frozen||pressed||held||inside)?1:0;
-      var tauC=calmT?((frozen||pressed)?.05:.11):.30;
+      var calmT=(reduce||frozen||pressed||held||inside||settling)?1:0;
+      var tauC=calmT?(settling?.03:((frozen||pressed)?.05:.11)):.30;
       c.hv1=ease(c.hv1,calmT,tauC,dt);
       c.hv =ease(c.hv ,c.hv1,tauC,dt);
       // 缩放：漂浮时的景深缩放 fs 与回正按 hv 混合，不再瞬间切目标值
@@ -12398,7 +12407,7 @@ document.addEventListener('keydown', e => {
       c.fs=ease(c.fs,fsT,.14,dt);
       c.sc=c.fs+(1-c.fs)*c.hv;
       // 明暗：变亮较快，变暗（回到漂浮）更慢，和位移节奏一致
-      var tl=(reduce||pressed||(frozen&&!c.snap))?1:Math.max(f*.82,ml);
+      var tl=(reduce||pressed||settling||(frozen&&!c.snap))?1:Math.max(f*.82,ml);
       if(c.snap&&(frozen||held)) c.lit=tl;                       // 退回飞行期间：直接贴到自然明暗（缩略图此时被飞行图盖着，看不到）
       else c.lit=ease(c.lit,tl,tl<c.lit?.16:.14,dt);             // 变暗不再拖 0.3s：和顶部黑幕同步
       if(Math.abs(tl-c.lit)>.004||Math.abs(fsT-c.fs)>.001||Math.abs(calmT-c.hv)>.004) busy=true;
@@ -12425,10 +12434,29 @@ document.addEventListener('keydown', e => {
     return null;
   }
   var _open=window.openLb;
-  if(typeof _open==='function') window.openLb=function(idx){
+  function _doOpen(self,args,idx){
     try{ var c=cardOf(idx); if(c){ neutral(c); pressCard=c.el; pressT=performance.now(); } }catch(e){}
     kick();
-    return _open.apply(this,arguments);
+    return _open.apply(self,args);
+  }
+  if(typeof _open==='function') window.openLb=function(idx){
+    var self=this, args=arguments, c=null;
+    try{ c=cardOf(idx); }catch(e){}
+    // 触屏：不在手指按下时回正（滚动 / 轻触都不再把卡片「啪」地掰正）。
+    // 只有真正点按、要打开灯箱时，才用约 0.15s 的 S 形过渡把卡片柔和回正（灯箱要量真实矩形），再飞入。
+    if(c && lastPtr==='touch' && !reduce && !openPending){
+      openPending=true; settleEl=c.el; kick();
+      var t0=performance.now();
+      (function wait(){
+        var done=c.hv>.93||performance.now()-t0>260;
+        if(!done){ requestAnimationFrame(wait); return; }
+        settleEl=null; openPending=false;
+        if(!panel.classList.contains('on')) return;     // 等待期间面板已关闭
+        _doOpen(self,args,idx);
+      })();
+      return;
+    }
+    return _doOpen(self,args,idx);
   };
   var _fo=window._lbFlyOut;
   if(typeof _fo==='function') window._lbFlyOut=function(){
@@ -12444,6 +12472,8 @@ document.addEventListener('keydown', e => {
     return _fo.apply(this,arguments);
   };
   body.addEventListener('pointerdown',function(e){
+    lastPtr=e.pointerType||'mouse';
+    if(lastPtr==='touch') return;                        // 触屏按下不触发「按下回正 + 提亮」
     var el=e.target.closest&&e.target.closest('.gx-card'); if(el){ pressCard=el; pressT=performance.now(); kick(); }
   },{passive:true,capture:true});
   inner.addEventListener('scroll',kick,{passive:true});
