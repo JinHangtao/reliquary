@@ -9140,6 +9140,12 @@ var _lbEaseFn = (function(){            // cubic-bezier(.32,.72,0,1)
   };
 })();
 function _lbLerp(a, b, k){ return a + (b - a) * k; }
+// 滤镜字符串：暗罩 v 作为最后一级 brightness（真实 DOM 里暗罩盖在「已套滤镜的缩略图」之上，顺序必须一致，否则落地交接有细微色差 = 闪一下）
+function _lbFStr(FV, idle){
+  var hv = Math.abs((FV.v == null ? 1 : FV.v) - 1) > .002;
+  if(idle) return 'brightness(1) saturate(1) contrast(1)' + (hv ? ' brightness(1)' : '');
+  return 'brightness(' + FV.b + ') saturate(' + FV.s + ') contrast(' + FV.c + ')' + (hv ? ' brightness(' + FV.v + ')' : '');
+}
 // 把 'brightness(.82) saturate(.68) contrast(1.05)' 解析成数值，便于逐帧插值（不支持的函数当作 1）
 // 缩略图上盖着一层景深暗罩 .gx-veil（不透明度随离屏幕中心的距离变化，手机上没有鼠标提亮，暗罩更重）。
 // 飞回的终点必须把这层暗罩也算进去，否则飞行图以「无暗罩」的亮度落地，交接给「带暗罩」的缩略图时，
@@ -9154,7 +9160,7 @@ function _lbVeilK(t){
   }catch(e){ return 1; }
 }
 function _lbParseFilter(str){
-  var o = { b: 1, s: 1, c: 1 };
+  var o = { b: 1, s: 1, c: 1, v: 1 };
   if(!str || str === 'none') return o;
   var re = /(brightness|saturate|contrast)\(\s*([\d.]+)(%?)\s*\)/g, m;
   while((m = re.exec(str))){
@@ -9180,16 +9186,16 @@ function _lbDriveSlow(img, t, b, dir, dur){
   if(_lbFromTf){ try{ var mx = new DOMMatrix(_lbFromTf); F.tx = mx.e; F.ty = mx.f; F.s = mx.a || 1; }catch(e){} }
 
   var FV = _lbParseFilter(dir === 'in' ? meta.filter : (meta.rest || meta.filter));
-  if(dir === 'out') FV.b *= _lbVeilK(t);   // 终点 = 缩略图滤镜 × 暗罩，与落地后缩略图的实际观感完全一致   // 缩略图端的滤镜
-  var hasFilter = Math.abs(FV.b - 1) > .002 || Math.abs(FV.s - 1) > .002 || Math.abs(FV.c - 1) > .002;
+  if(dir === 'out') FV.v = _lbVeilK(t);   // 终点 = 缩略图滤镜 → 再套暗罩，与落地后缩略图的实际观感完全一致
+  var hasFilter = Math.abs(FV.b - 1) > .002 || Math.abs(FV.s - 1) > .002 || Math.abs(FV.c - 1) > .002 || Math.abs(FV.v - 1) > .002;
 
   /* 滤镜（缩略图的暗色调 ⇄ 原色）交给 WAAPI：filter 是可由合成器线程驱动的属性，
      不占主线程；以前每帧 JS 拼 filter 字符串并写入，大图每帧都要重新提交 + 重绘，手机上最容易掉帧。
      缓动曲线与 JS 进度同一条，视觉不变。不支持时回退到逐帧 JS 写入。 */
   var fAnim = null;
   if(hasFilter && img.animate){
-    var _idleF = 'brightness(1) saturate(1) contrast(1)';
-    var _thumbF = 'brightness(' + FV.b + ') saturate(' + FV.s + ') contrast(' + FV.c + ')';
+    var _idleF = _lbFStr(FV, true);
+    var _thumbF = _lbFStr(FV);
     try{
       fAnim = img.animate(
         dir === 'in' ? [{ filter: _thumbF }, { filter: _idleF }] : [{ filter: _idleF }, { filter: _thumbF }],
@@ -9299,7 +9305,8 @@ function _lbDriveSlow(img, t, b, dir, dur){
     // 滤镜随同一进度 u 平滑过渡（缩略图的暗色调 ⇄ 灯箱里的原色），不再在起点/终点跳变
     if(hasFilter && !fAnim){
       var fb = _lbLerp(FV.b, 1, u), fs = _lbLerp(FV.s, 1, u), fc = _lbLerp(FV.c, 1, u);
-      img.style.filter = (u > .998) ? '' : 'brightness(' + fb.toFixed(3) + ') saturate(' + fs.toFixed(3) + ') contrast(' + fc.toFixed(3) + ')';
+      img.style.filter = (u > .998) ? '' : 'brightness(' + fb.toFixed(3) + ') saturate(' + fs.toFixed(3) + ') contrast(' + fc.toFixed(3) + ')' +
+        (Math.abs(FV.v - 1) > .002 ? ' brightness(' + _lbLerp(FV.v, 1, u).toFixed(3) + ')' : '');
     }
     if(needBoxClip) box.style.clipPath = boxClip;
 
@@ -9356,8 +9363,8 @@ function _lbDriveFast(img, t, b, dir, dur){
   var M = { tx: P.tx * .5 + nx * hh, ty: P.ty * .5 + ny * hh, s: P.s + (1 - P.s) * _LB_MID_GROW };
 
   var FV = _lbParseFilter(dir === 'in' ? meta.filter : (meta.rest || meta.filter));
-  if(dir === 'out') FV.b *= _lbVeilK(t);   // 终点 = 缩略图滤镜 × 暗罩，与落地后缩略图的实际观感完全一致
-  var hasFilter = Math.abs(FV.b - 1) > .002 || Math.abs(FV.s - 1) > .002 || Math.abs(FV.c - 1) > .002;
+  if(dir === 'out') FV.v = _lbVeilK(t);   // 终点 = 缩略图滤镜 → 再套暗罩，与落地后缩略图的实际观感完全一致
+  var hasFilter = Math.abs(FV.b - 1) > .002 || Math.abs(FV.s - 1) > .002 || Math.abs(FV.c - 1) > .002 || Math.abs(FV.v - 1) > .002;
 
   var cx0 = b.left + b.width / 2, cy0 = b.top + b.height / 2, BW = b.width, BH = b.height;
   var N = 24, kfW = [], kfI = [], kfR = [], kfOt = [], kfOb = [];
@@ -9416,8 +9423,8 @@ function _lbDriveFast(img, t, b, dir, dur){
   var opt = { duration: dur, easing: 'linear', fill: 'both' };
   var aW = W.animate(kfW, opt), aI = I.animate(kfI, opt), aR = W.animate(kfR, opt), aF = null, aOt = Ot ? Ot.animate(kfOt, opt) : null, aOb = Ob ? Ob.animate(kfOb, opt) : null;
   if(hasFilter){
-    var idle = 'brightness(1) saturate(1) contrast(1)';
-    var thumbF = 'brightness(' + FV.b + ') saturate(' + FV.s + ') contrast(' + FV.c + ')';
+    var idle = _lbFStr(FV, true);
+    var thumbF = _lbFStr(FV);
     try{ aF = I.animate(dir === 'in' ? [{ filter: thumbF }, { filter: idle }] : [{ filter: idle }, { filter: thumbF }],
                         { duration: dur, easing: _LB_EASE, fill: 'both' }); }catch(e){ aF = null; }
   }
@@ -9467,7 +9474,7 @@ function _lbDriveFast(img, t, b, dir, dur){
     if(dir === 'out'){                                  // 真图以「缩略图姿态」接棒，供原有的落地交接（淡入缩略图/淡出飞行图）使用
       img.style.transform = P.transform;
       img.style.clipPath  = P.clip;
-      if(hasFilter) img.style.filter = 'brightness(' + FV.b + ') saturate(' + FV.s + ') contrast(' + FV.c + ')';
+      if(hasFilter) img.style.filter = _lbFStr(FV);
       /* 遮挡窗交接：代理层（含 O 窗口）马上要被移除，真图在落地淡出的 ~200ms 里仍留在 #lb 里。
          和旧方案一样，让 #lbImgBox 带着「缩略图可见矩形」这个窗口接棒，
          否则缩略图被 tab 栏盖住的那一截会在淡出期间显示在 tab 栏前面（穿模）。
@@ -9581,19 +9588,19 @@ function _lbFlyOut(){
               （飞行图是高分辨率大图缩放而来，与缩略图的栅格化有亚像素差，硬切会有一次细微「跳」）
            ④ 整个交接期间保持 _lbFlying=true：滚动模糊 / 标题压缩等主线程任务继续让路，
               不会在淡入的同时抢帧；交接完成后才恢复 */
-        var th = _lbThumb, IN = 180, OUT = 170, OVERLAP = 60, _partial = _lbThumbPartial;
+        var th = _lbThumb, IN = 180, OUT = 170, OVERLAP = 60, _partial = _lbThumbPartial, _narrow = window.innerWidth <= 768;
         var tail = _lbTail = { fade: null, th: th, timer: 0, thAnim: null, off: null };
         var restF = 'none';
         if(th){
           var tm = _lbThumbMeta(th);
           restF = tm.rest || tm.filter || 'none';
-          if(!_partial){   // 半遮挡缩略图：不动 filter / will-change（避免图层提升与磨砂层重采样引起闪烁），整个交接保持原样
+          if(!_partial && !_narrow){   // 手机端：不钉 filter / 不加 will-change（升层会让整张卡片重新栅格化 = 落地闪）。半遮挡缩略图：不动 filter / will-change（避免图层提升与磨砂层重采样引起闪烁），整个交接保持原样
             th.style.setProperty('transition', 'filter 0s', 'important');
             th.style.setProperty('filter', restF, 'important');
             th.style.willChange = 'opacity';
           }
           _lbRestoreThumb(true);                     // visibility 还原（此时仍被飞行图盖住）；小介绍留到落地后再统一淡入
-          if(!_partial) try{   // 半遮挡：被遮住那截一直可见，再做 0→1 淡入反而会让它先消失再出现（闪烁）
+          if(!_partial && !_narrow) try{   // 手机端不做缩略图 opacity 动画（与飞行图淡出叠加会让整张卡片明暗起伏）。半遮挡：被遮住那截一直可见，再做 0→1 淡入反而会让它先消失再出现（闪烁）
             tail.thAnim = th.animate([{ opacity: 0 }, { opacity: 1 }], { duration: IN, easing: 'cubic-bezier(.33,0,.2,1)' });
           }catch(e){}
         }
@@ -9644,7 +9651,16 @@ function _lbFlyOut(){
              遮挡窗仍在，所以不会穿到 tab 栏前面）。
            · 手机端：保持原子交接（避免手机 GPU 对带滤镜+裁切的图层做 opacity 动画），
              但同样延后到黑底淡完之后，不再与黑底的毛玻璃淡出同帧换层。 */
-        var _narrow = window.innerWidth <= 768;
+        if(_narrow){
+          /* 手机端落地：缩略图此刻已在飞行图下方完整显示（静止、不透明）。等它稳定绘制几帧，
+             再把飞行图一次撤掉 —— 两者终态（含暗罩）已对齐，下方什么都不再变化。 */
+          tail.timer = setTimeout(function(){
+            tail.timer = 0;
+            if(_lbTail !== tail) return;
+            requestAnimationFrame(function(){ requestAnimationFrame(function(){ requestAnimationFrame(_finish); }); });
+          }, 90);
+          return;
+        }
         tail.timer = setTimeout(function(){
           tail.timer = 0;
           if(_lbTail !== tail) return;               // 期间被取消（又打开了灯箱）
