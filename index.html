@@ -12273,15 +12273,16 @@ document.addEventListener('keydown', e => {
     if(geoDirty) measure();
     var vh=window.innerHeight, vc=vh*.52, busy=false, now=performance.now();
     var st=inner.scrollTop, it=inner.getBoundingClientRect().top;     // 每帧只读这一次
-    var frozen=frozenGlobal(), tm=now/1000, mouseOn=mx>-1000&&window.innerWidth>768;
-    if(lastFrozen&&!frozen) busy=true; lastFrozen=frozen;
+    var fg=frozenGlobal(), curEl=null, tm=now/1000, mouseOn=mx>-1000&&window.innerWidth>768;
+    if(fg){ try{ var tt=window._lbThumbOf(window.curLbIdx); curEl=tt&&tt.closest?tt.closest('.gx-card'):null; }catch(e){} }   // 只有被打开的这一张需要回正
+    if(lastFrozen&&!fg) busy=true; lastFrozen=fg;
     var reads=[];
     for(var i=0;i<cards.length;i++){
       var c=cards[i], cy=c.cy0-st+it;                 // 布局中心（视口坐标）
       var vis=!(cy+c.h/2<-vh*.7||cy-c.h/2>vh*1.7);
       if(!vis){ if(c.wc){ c.el.style.willChange=''; c.wc=false; } continue; }
       if(!c.wc){ c.el.style.willChange='scale,translate,rotate'; c.wc=true; }
-      var pressed=(pressCard===c.el&&now-pressT<1600);
+      var pressed=(pressCard===c.el&&now-pressT<1600), frozen=(curEl===c.el);
       var f=clamp(1-Math.abs(cy-vc)/(vh*.62),0,1); f=f*f*(3-2*f);
       var ml=0, inside=false;
       if(mouseOn){
@@ -12293,7 +12294,7 @@ document.addEventListener('keydown', e => {
       var calm=reduce||frozen||pressed||inside;        // 悬停 / 按下 / 灯箱：回正
       var tl=(reduce||frozen||pressed)?1:Math.max(f*.82,ml);
       var ts=calm?1:.945+.055*f;
-      var fkT=calm?0:1, rate=pressed?.5:(calm?.18:.05);
+      var fkT=calm?0:1, rate=pressed?.5:(calm?.18:.035);   // 回正快，恢复漂浮慢（约 1 秒），衔接柔和
       c.lit+=(tl-c.lit)*.14; c.sc+=(ts-c.sc)*.16; c.fk+=(fkT-c.fk)*rate;
       if(Math.abs(tl-c.lit)>.004||Math.abs(ts-c.sc)>.001||Math.abs(fkT-c.fk)>.004) busy=true;
       var fy=0, fr=0;
