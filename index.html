@@ -4425,11 +4425,23 @@ window._sceneState = {
   // ── Image caption hover binder ──
   // Replaces the old inline onmouseenter/onmouseleave strings.
   // Called after panelBody.innerHTML is set, same pattern as _bindCollapseButtons.
+  // 触屏点按会补发一次「模拟 mouseenter」（且不会有对应的 mouseleave）→ 小介绍被钉在悬停态。
+  // 灯箱打开时 .lb-cap-hold 把它压成 0，飞回落地后放开，它就从 0 淡入 1 —— 手机上必现的那一闪。
+  // 所以：无 hover 能力的设备、或刚刚发生过触摸的模拟鼠标事件，一律不进入悬停态。
+  var _capTouchT = 0;
+  ['touchstart','touchend'].forEach(function(ev){
+    document.addEventListener(ev, function(){ _capTouchT = Date.now(); }, { passive:true, capture:true });
+  });
+  function _capHoverOk(){
+    if(window.matchMedia && window.matchMedia('(hover:none)').matches) return false;
+    return Date.now() - _capTouchT > 900;
+  }
   function _bindImageCaps(root){
     root.querySelectorAll('[data-cap]').forEach(function(card){
       var cap = card.querySelector('.gi-cap');
       if(!cap) return;
       card.addEventListener('mouseenter', function(){
+        if(!_capHoverOk()) return;
         cap.style.opacity = '1';
         cap.style.transform = 'translateY(0)';
       });
