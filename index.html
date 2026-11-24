@@ -1190,9 +1190,10 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 <style id="gx-css">
 /* ── 作品预览页：策展式排布 + 景深聚焦 + 手电筒显影 ── */
 #panelBody .gx-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:14px;row-gap:34px;align-items:start;margin-top:28px;padding-bottom:30px}
-#panelBody .gx-card{grid-column:span var(--span,12);margin-top:var(--off,0px);will-change:scale,translate,rotate;box-shadow:0 34px 70px -28px rgba(0,0,0,.9),0 10px 24px -14px rgba(0,0,0,.6)}
+#panelBody .gx-card{grid-column:var(--start,auto) / span var(--span,12);margin-top:var(--off,0px);will-change:scale,translate,rotate;box-shadow:0 34px 70px -28px rgba(0,0,0,.9),0 10px 24px -14px rgba(0,0,0,.6)}
 #panelBody .gx-card img{object-position:center !important}
-@media (max-width:900px){ #panelBody .gx-card{grid-column:span var(--s2,12)} }
+#panelBody .gx-card[style*="--span:5"]{max-height:62vh}
+@media (max-width:900px){ #panelBody .gx-card{grid-column:auto / span var(--s2,12)} }
 @media (max-width:768px){
   #panelBody .gx-grid{grid-template-columns:1fr;row-gap:14px}
   #panelBody .gx-card{grid-column:1/-1;margin-top:0}
@@ -4899,20 +4900,25 @@ window._sceneState = {
     if(sec.images && sec.images.length){
       var isTwoCol = sec.id === 'painting' || sec.id === 'stmt';
       // 策展式排布：首张通栏主图，其后 7/5、5/7、4/4/4 交替，同一行内作品错位下沉；窄屏自动降级
-      var _gxPlan = (function(n){
-        var T = [[12],[7,5],[5,7],[4,4,4],[8,4],[12],[4,8],[6,6]], out = [], ti = 0;
-        if(n === 1) return [[12,12,0]];
+      var _gxPlan = (function(n, compact){
+        // 每一行的宽度、起始列、下沉量都轮换变化：参差、不工整，但仍在 12 列网格内
+        var V3 = [[4,4,4],[5,3,4],[3,5,4],[4,3,5]], O3 = [[0,56,18],[24,0,64],[0,72,30],[40,12,80]];
+        var V2 = [[[5,1],[4,8]],[[4,3],[5,8]],[[5,2],[4,7]],[[4,1],[5,8]]], O2 = [[0,84],[56,0],[0,100],[70,10]];
+        var seq = compact ? [3] : [1,2,3,1,2,3], out = [], si = 0, v = 0;
         while(out.length < n){
-          var row = T[ti++ % T.length], left = n - out.length;
-          if(left < row.length) row = left === 1 ? [12] : (left === 2 ? [7,5] : [4,4,4]);
-          var offs = row.length === 1 ? [0] : row.length === 2 ? [0,56] : [0,64,22];
-          row.forEach(function(sp, k){
-            var s2 = sp >= 8 ? 12 : (row.length === 3 ? (k === 2 ? 12 : 6) : sp);
-            out.push([sp, s2, offs[k]]);
-          });
+          var kind = seq[si++ % seq.length], left = n - out.length;
+          if(left < kind) kind = left;
+          if(kind === 1){ out.push([12,12,0,'auto']); continue; }
+          if(kind === 2){
+            var a2 = V2[v % 4], o2 = O2[v % 4]; v++;
+            out.push([a2[0][0],6,o2[0],a2[0][1]]); out.push([a2[1][0],6,o2[1],a2[1][1]]);
+          } else {
+            var a3 = V3[v % 4], o3 = O3[v % 4]; v++;
+            for(var k = 0; k < 3; k++) out.push([a3[k], compact ? 6 : (k === 2 ? 12 : 6), o3[k], 'auto']);
+          }
         }
         return out;
-      })(sec.images.length);
+      })(sec.images.length, isTwoCol);
 
       html += '<div class="gx-grid">';
       sec.images.forEach(function(img, imgIdx){
@@ -4920,7 +4926,7 @@ window._sceneState = {
         _lbMeta[lbIdx] = { title: img.cn, en: img.en, desc: img.desc || '' };
         var ratio = isTwoCol ? '3/4' : '16/9';
         html += '<div class="gx-card" data-lbidx="'+esc(lbIdx)+'" data-lbsrc="'+esc(img.src)+'" data-tilt data-cap onclick="openLb(\''+esc(lbIdx)+'\')" '
-          + 'style="--span:'+_gxPlan[imgIdx][0]+';--s2:'+_gxPlan[imgIdx][1]+';--off:'+_gxPlan[imgIdx][2]+'px;position:relative;overflow:hidden;border-radius:11px;aspect-ratio:'+ratio+';background:#0e0d0c;border:1px solid #1e1c1a;cursor:none;">'
+          + 'style="--span:'+_gxPlan[imgIdx][0]+';--s2:'+_gxPlan[imgIdx][1]+';--off:'+_gxPlan[imgIdx][2]+'px;--start:'+_gxPlan[imgIdx][3]+';position:relative;overflow:hidden;border-radius:11px;aspect-ratio:'+ratio+';background:#0e0d0c;border:1px solid #1e1c1a;cursor:none;">'
           + '<img data-src="'+esc(img.src)+'" decoding="async" style="width:100%;height:100%;object-fit:cover;object-position:top;display:block;transition:filter .4s ease;filter:brightness(.78) saturate(.62) contrast(1.06);pointer-events:none">'
           // shine overlay — follows mouse as a radial gradient hotspot
           + '<div class="gi-shine" style="position:absolute;inset:0;pointer-events:none;border-radius:11px;opacity:0;transition:opacity .35s ease;background:radial-gradient(circle at 50% 50%, rgba(255,240,190,.13) 0%, transparent 65%);"></div>'
@@ -12229,7 +12235,7 @@ document.addEventListener('keydown', e => {
   function collect(){
     cards=[].slice.call(body.querySelectorAll('.gx-card')).map(function(el,i){
       fitRatio(el);
-      return {el:el, img:el.querySelector('img'), lit:.35, sc:.95, ty:0, ap:0, ph:i*1.9+.7, sp:.55+((i*3)%4)*.11, k:.04+((i*7)%5)*.012, w:''};
+      return {el:el, img:el.querySelector('img'), lit:.35, sc:.95, ty:0, ap:0, rot0:(((i*53)%7)-3)*.4, ph:i*1.9+.7, sp:.55+((i*3)%4)*.11, k:.04+((i*7)%5)*.012, w:''};
     });
     kick();
   }
@@ -12257,11 +12263,11 @@ document.addEventListener('keydown', e => {
       }
       // 漂浮：每张作品相位、速度各不相同，缓慢上下浮动并轻微摇摆
       var fy=0, fr=0;
-      if(!reduce){ var tm=performance.now()/1000; fy=Math.sin(tm*c.sp+c.ph)*7; fr=Math.sin(tm*c.sp*.7+c.ph*1.3)*.45; }
+      if(!reduce){ var tm=performance.now()/1000; fy=Math.sin(tm*c.sp+c.ph)*9; fr=Math.sin(tm*c.sp*.7+c.ph*1.3)*.6; }
       c.ap=c.ty+fy;
       c.el.style.scale=c.sc.toFixed(4);
       c.el.style.translate='0 '+c.ap.toFixed(2)+'px';
-      c.el.style.rotate=fr.toFixed(3)+'deg';
+      c.el.style.rotate=(c.rot0+fr).toFixed(3)+'deg';
     }
     if(busy||!reduce) kick();
   }
