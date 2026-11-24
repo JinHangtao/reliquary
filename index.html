@@ -12352,7 +12352,6 @@ document.addEventListener('keydown', e => {
   }
   var _open=window.openLb;
   if(typeof _open==='function') window.openLb=function(idx){
-    try{ if(window._lbKillFlyDim) window._lbKillFlyDim(); }catch(e){}
     try{ var c=cardOf(idx); if(c){ neutral(c); pressCard=c.el; pressT=performance.now(); } }catch(e){}
     kick();
     return _open.apply(this,arguments);
@@ -12368,83 +12367,8 @@ document.addEventListener('keydown', e => {
         var vo0=(1-c.lit)*.5; c.vo=vo0; if(c.veil) c.veil.style.opacity=vo0.toFixed(3);
       }
     }catch(e){}
-    var _dim=null; try{ _dim=prepFlyDim(window.curLbIdx); }catch(e){}   // 飞出去之前先量好（此刻缩略图位置、黑幕位置都没变）
-    var _ret=_fo.apply(this,arguments);
-    try{ if(_dim) runFlyDim(_dim); }catch(e){}
-    return _ret;
+    return _fo.apply(this,arguments);
   };
-
-  /* ── 飞回时「黑幕 + 卡片暗度」跟着飞行图一起落地 ──
-     飞行图在灯箱层（z-index 3000）里，盖在面板顶部黑幕（.tb 暗雾）和卡片自带的暗层（.gx-veil）之上，
-     所以它落地时是「亮」的，等它淡出、露出下面真正的缩略图，才突然被黑幕压暗。
-     做法：飞行期间在飞行图【上面】临时盖一份一模一样的「暗层 + 黑幕」（只覆盖缩略图可见矩形，
-     且不超出 tab 栏下沿），随飞行进度淡入；落地后与飞行图【同一时刻、同一时长】淡出（直接读 _lbTail.fade 的时间），
-     所以交叉淡出的两端明暗一致，没有「先亮后暗」。*/
-  var _dimEl=null, _dimMO=null;
-  function killFlyDim(){
-    if(_dimMO){ _dimMO.disconnect(); _dimMO=null; }
-    if(_dimEl){ try{ _dimEl.remove(); }catch(e){} _dimEl=null; }
-  }
-  window._lbKillFlyDim=killFlyDim;
-  function prepFlyDim(idx){
-    var c=cardOf(idx), t=window._lbThumbOf?window._lbThumbOf(idx):null;
-    if(!c||!t||typeof _lbCalcWindow!=='function') return null;
-    var a=t.getBoundingClientRect(), w=_lbCalcWindow();
-    var L=Math.max(a.left,w.left), R=Math.min(a.right,w.right), T=Math.max(a.top,w.top), B=Math.min(a.bottom,w.bottom);
-    if(R-L<2||B-T<2) return null;                         // 整张都在 tab 栏 / 窗口外：没有可见部分，不需要
-    var tb=inner.querySelector('.panel-topblur .tb'), fog=null;
-    if(tb){
-      var fr=tb.getBoundingClientRect(), cs=getComputedStyle(tb,'::after');
-      var fh=fr.height*.88;                              // ::after 的 bottom:12%
-      if(fh>1&&cs.backgroundImage&&cs.backgroundImage!=='none'){
-        fog={ l:fr.left, t:fr.top, w:fr.width, h:fh, bg:cs.backgroundImage, mask:(cs.webkitMaskImage&&cs.webkitMaskImage!=='none')?cs.webkitMaskImage:cs.maskImage };
-      }
-    }
-    var vo=(1-naturalLit(c))*.5;
-    return { L:L,R:R,T:T,B:B, vo:vo, fog:fog, rad:parseFloat(getComputedStyle(c.el).borderRadius)||10 };
-  }
-  function runFlyDim(d){
-    killFlyDim();
-    var lb=document.getElementById('lb'); if(!lb||!window._lbFlying) return;   // 没有飞行（减少动效等）就不用盖
-    var ov=document.createElement('div');
-    ov.setAttribute('aria-hidden','true');
-    ov.style.cssText='position:fixed;inset:0;z-index:20;pointer-events:none;opacity:0;';
-    if(d.vo>.004){
-      var v=document.createElement('div');
-      v.style.cssText='position:absolute;left:'+d.L+'px;top:'+d.T+'px;width:'+(d.R-d.L)+'px;height:'+(d.B-d.T)+'px;background:#070605;opacity:'+d.vo.toFixed(3)+';border-radius:'+d.rad+'px;';
-      ov.appendChild(v);
-    }
-    if(d.fog){
-      var f=d.fog, fe=document.createElement('div');
-      var ct=Math.max(0,d.T-f.t), cb=Math.max(0,(f.t+f.h)-d.B), cl=Math.max(0,d.L-f.l), cr=Math.max(0,(f.l+f.w)-d.R);
-      fe.style.cssText='position:absolute;left:'+f.l+'px;top:'+f.t+'px;width:'+f.w+'px;height:'+f.h+'px;background-image:'+f.bg+';'+
-        (f.mask?('-webkit-mask-image:'+f.mask+';mask-image:'+f.mask+';'):'')+
-        'clip-path:inset('+ct+'px '+cr+'px '+cb+'px '+cl+'px);';
-      ov.appendChild(fe);
-    }
-    lb.appendChild(ov); _dimEl=ov;
-    var slow=(window._LB_SLOW>0?window._LB_SLOW:1), FLY=300*slow;
-    try{ ov.animate([{opacity:0},{opacity:1}],{duration:FLY,easing:'cubic-bezier(.5,0,1,1)',fill:'forwards'}); }catch(e){ ov.style.opacity='1'; }
-    // 飞行结束（_lbFlying 摘掉）的那一刻同步撤掉：微任务里执行，早于下一次绘制
-    _dimMO=new MutationObserver(function(){ if(!lb.classList.contains('lb-flying')) killFlyDim(); });
-    _dimMO.observe(lb,{attributes:true,attributeFilter:['class']});
-    // 落地交接：飞行图开始淡出的同一帧，暗层按同样的时长淡出（读 _lbTail.fade 的真实时间）
-    var started=false;
-    (function watch(){
-      if(!_dimEl||_dimEl!==ov) return;
-      var tl=window._lbTail;
-      if(!started&&tl&&tl.fade){
-        started=true;
-        var tm={}; try{ tm=tl.fade.effect.getTiming(); }catch(e){}
-        try{
-          var o2=ov.animate([{opacity:1},{opacity:0}],{duration:tm.duration||170,easing:tm.easing||'cubic-bezier(.4,0,.6,1)',fill:'forwards'});
-          o2.onfinish=killFlyDim;
-        }catch(e){ killFlyDim(); }
-        return;
-      }
-      requestAnimationFrame(watch);
-    })();
-  }
   body.addEventListener('pointerdown',function(e){
     var el=e.target.closest&&e.target.closest('.gx-card'); if(el){ pressCard=el; pressT=performance.now(); kick(); }
   },{passive:true,capture:true});
