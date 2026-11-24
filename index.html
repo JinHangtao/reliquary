@@ -921,16 +921,23 @@ body::after {
    * 5. transform: translateZ(0) 强制独立合成层（iOS Safari 需要）。
    */
   /* ── 背景幕：保持合成层活跃，GPU 不重建 ── */
+  /* 手机端「飞回落地整张卡片闪一下」的根因：
+     1) 这层幕布带 backdrop-filter(blur+brightness .48)，且关闭淡出 .45s 比飞回(300ms)+落地交接还长，
+        飞行图落地、缩略图显现时，幕布还留着一层带模糊+压暗的残影盖在整张卡片上，之后才继续淡掉 -> 卡片先暗后亮一闪；
+     2) backdrop-filter 常驻在 opacity:.001 上，直到 _cleanFn 把 .lb 设成 hidden 才整层卸载，卸载那一帧整屏重合成。
+     修法：去掉 backdrop-filter（底色本来就近乎不透明，换成纯色 .965 观感一致），关闭时幕布淡出缩到 .2s，
+     保证飞行图落地前幕布早已完全透明，落地交接时卡片下面什么都不再变化。 */
   .lb-bg{
-    background:rgba(3,2,1,.90);
-    backdrop-filter:blur(20px) saturate(.25) brightness(.48);
-    -webkit-backdrop-filter:blur(20px) saturate(.25) brightness(.48);
+    background:rgba(3,2,1,.965);
+    backdrop-filter:none;
+    -webkit-backdrop-filter:none;
     opacity:0.001;
     transform:translateZ(0);
     will-change:opacity;
     transition:opacity .45s cubic-bezier(.4,0,.2,1);
   }
   .lb.on .lb-bg{ opacity:1; }
+  .lb:not(.on) .lb-bg{ transition:opacity .2s cubic-bezier(.4,0,.2,1); }
 
   /* ── 内容层：入场上浮，退场自动还原（remove .on 触发） ── */
   .lb{align-items:center;overflow:visible;justify-content:center;}
