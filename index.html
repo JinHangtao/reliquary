@@ -909,35 +909,20 @@ body::after {
 .lb-btns button:active{border-color:var(--gold);color:var(--gold);}
 /* mobile lightbox — phones only, tablets use desktop layout */
 @media(max-width:768px){
-  /* 
-   * 丝滑模糊方案：
-   * 1. backdrop-filter 始终挂载（不随 opacity 消失），避免手机端
-   *    blur 从 0 重新合成时的"闪烁感"。
-   * 2. opacity 负责淡入淡出，但起点改为极小值（0.001）而非 0，
-   *    让 GPU 保持该层的合成上下文，避免每次都重新光栅化。
-   * 3. transition 拆分：opacity 用更长的 ease-out 曲线（先快后慢），
-   *    让模糊感知上更"丝滑"地展开。
-   * 4. will-change: opacity 提示浏览器提前升层，消除首帧卡顿。
-   * 5. transform: translateZ(0) 强制独立合成层（iOS Safari 需要）。
-   */
-  /* ── 背景幕：保持合成层活跃，GPU 不重建 ── */
-  /* 手机端「飞回落地整张卡片闪一下」的根因：
-     1) 这层幕布带 backdrop-filter(blur+brightness .48)，且关闭淡出 .45s 比飞回(300ms)+落地交接还长，
-        飞行图落地、缩略图显现时，幕布还留着一层带模糊+压暗的残影盖在整张卡片上，之后才继续淡掉 -> 卡片先暗后亮一闪；
-     2) backdrop-filter 常驻在 opacity:.001 上，直到 _cleanFn 把 .lb 设成 hidden 才整层卸载，卸载那一帧整屏重合成。
-     修法：去掉 backdrop-filter（底色本来就近乎不透明，换成纯色 .965 观感一致），关闭时幕布淡出缩到 .2s，
-     保证飞行图落地前幕布早已完全透明，落地交接时卡片下面什么都不再变化。 */
+  /* 手机灯箱背景只承担纯色遮罩，不再使用毛玻璃或常驻 GPU 合成层。
+     关闭时让它在 0.2s 内淡到完全透明；缩略图落地之后的延迟清理
+     不应再卸载一个被 translateZ(0)/will-change 强制保留的全屏层。 */
   .lb-bg{
     background:rgba(3,2,1,.965);
     backdrop-filter:none;
     -webkit-backdrop-filter:none;
-    opacity:0.001;
-    transform:translateZ(0);
-    will-change:opacity;
+    opacity:0;
+    transform:none;
+    will-change:auto;
     transition:opacity .45s cubic-bezier(.4,0,.2,1);
   }
   .lb.on .lb-bg{ opacity:1; }
-  .lb:not(.on) .lb-bg{ transition:opacity .2s cubic-bezier(.4,0,.2,1); }
+  .lb:not(.on) .lb-bg{ opacity:0; will-change:auto; transition:opacity .2s cubic-bezier(.4,0,.2,1); }
 
   /* ── 内容层：入场上浮，退场自动还原（remove .on 触发） ── */
   .lb{align-items:center;overflow:visible;justify-content:center;}
