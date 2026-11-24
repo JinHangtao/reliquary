@@ -3756,6 +3756,25 @@ window._sceneState = {
   // labelEls exposed after map() completes — see below
 
   // Cache label dimensions after append (read once, never again in the loop)
+  // ── Localized sub-label (third line) ──
+  function _subText(cr){
+    try{ if(window.I18N && I18N.localize){ var l=I18N.localize(cr.section); if(l && l.cn) return l.cn; } }catch(e){}
+    return cr.section.cn||'';
+  }
+  function _isCJK(){ var c=(window.I18N&&I18N.lang)||''; return c==='zh-CN'||c==='zh-TW'||c==='zh'||c===''; }
+  function _renderSub(cr, el){
+    var box=el.querySelector('[data-role="sub"]'), sp=el.querySelector('[data-role="subtxt"]');
+    if(!box||!sp) return;
+    var t=_subText(cr), cjk=_isCJK();
+    var same=String(t).trim().toLowerCase()===String(cr.section.label||'').trim().toLowerCase();
+    box.style.visibility = (same||!t) ? 'hidden' : 'visible';   // 保留占位：标签高度恒定，换字不引起上下位移
+    sp.textContent=t;
+    if(cjk){
+      sp.style.cssText='display:inline-block;font-family:"ZCOOL QingKe HuangYou",serif;font-size:.62rem;color:#a09893;letter-spacing:.12em;text-transform:none;';
+    } else {
+      sp.style.cssText='display:inline-block;font-family:"Jost",sans-serif;font-weight:400;font-size:.5rem;color:#a09893;letter-spacing:.3em;text-transform:uppercase;';
+    }
+  }
   var labelEls = crystals.map(function(cr,i){
     var el = document.createElement('div');
     var isCorner = cr.isCorner;
@@ -3817,11 +3836,9 @@ window._sceneState = {
         font-size:${isCorner?'1.05rem':'.92rem'};color:#f0ece2;letter-spacing:.02em;">
         ${cr.section.label}
       </div>
-      <div style="font-family:'ZCOOL QingKe HuangYou',serif;font-size:.62rem;
-        color:#a09893;letter-spacing:.12em;margin-top:2px;">
-        ${cr.section.cn}
-      </div>
+      <div data-role="sub" style="margin-top:2px;height:1rem;line-height:1rem;white-space:nowrap;"><span data-role="subtxt" style="display:inline-block;"></span></div>
     `;
+    _renderSub(cr, el);
     labelContainer.appendChild(el);
     return el;
   });
@@ -3838,7 +3855,96 @@ window._sceneState = {
       labelHalfW[i] = el.offsetWidth  * 0.5;
       labelHalfH[i] = el.offsetHeight * 0.5;
     });
+    labelEls.forEach(function(el,i){ _renderSub(crystals[i], el); });
   });
+
+  // ── Re-localize stone labels on language change (animate inner span only) ──
+  // 换字发生在旧字已完全淡出的瞬间：立即采用新宽度。若仍做缓动，会让标签中心先偏移半个宽度差再回正——那就是「跳一下」。
+  function _remeasure(i){
+    var el=labelEls[i]; if(!el) return;
+    labelHalfW[i]=el.offsetWidth*0.5; labelHalfH[i]=el.offsetHeight*0.5;
+  }
+  // 柔边遮罩扫过文字：旧字被「抹去」、新字被「写出」，同一方向（阅读方向），无逐字 DOM、无跳变
+  var _MASK_OUT='linear-gradient(90deg,transparent 0%,transparent 33.3%,#000 66.6%,#000 100%)';
+  var _MASK_IN ='linear-gradient(90deg,#000 0%,#000 33.3%,transparent 66.6%,transparent 100%)';
+  function _setMask(sp, img){
+    var st=sp.style;
+    st.webkitMaskImage=st.maskImage=img;
+    st.webkitMaskSize=st.maskSize='300% 100%';
+    st.webkitMaskRepeat=st.maskRepeat='no-repeat';
+    st.webkitMaskPosition=st.maskPosition='100% 0';
+  }
+  function _clearMask(sp){
+    var st=sp.style;
+    st.webkitMaskImage=st.maskImage=''; st.webkitMaskSize=st.maskSize='';
+    st.webkitMaskRepeat=st.maskRepeat=''; st.webkitMaskPosition=st.maskPosition='';
+  }
+  function _swapSub(i, tok){
+    var el=labelEls[i], cr=crystals[i];
+    var sp=el.querySelector('[data-role="subtxt"]');
+    if(!sp || el._subTok!==tok) return;
+    sp.getAnimations().forEach(function(a){ a.cancel(); });
+    // 旧字：像被水波推远一样，缓缓淡出、微微失焦（无位移跳动，不做从左到右的擦除）
+    var out=sp.animate([
+      {opacity:1, filter:'blur(0px)',   transform:'scale(1)'},
+      {opacity:.55, filter:'blur(1.2px)', transform:'scale(.995)', offset:.45},
+      {opacity:0, filter:'blur(3px)',   transform:'scale(.985)'}
+    ],{duration:340,easing:'cubic-bezier(.45,0,.55,1)',fill:'forwards'});
+    out.onfinish=function(){
+      if(el._subTok!==tok) return;
+      _renderSub(cr, el);              // 换文
+      _remeasure(i);
+      sp.style.opacity='1';
+      // 新字：整体从虚焦中缓缓聚焦、亮起，像水面平静后倒影变清晰；多段透明度让起步更柔
+      var inn=sp.animate([
+        {opacity:0,   filter:'blur(5px)',   transform:'translateY(3px) scale(1.012)'},
+        {opacity:.35, filter:'blur(2.6px)', transform:'translateY(1.6px) scale(1.006)', offset:.32},
+        {opacity:.85, filter:'blur(.6px)',  transform:'translateY(.3px) scale(1.001)',  offset:.7},
+        {opacity:1,   filter:'blur(0px)',   transform:'translateY(0) scale(1)'}
+      ],{duration:1250,easing:'cubic-bezier(.3,.6,.25,1)'});
+      out.cancel();
+    };
+  }
+  // 与「空间涟漪」同频：不再自己排时间表，而是实时读取那圈折射波的真实半径——
+  // 波前扫到哪块石头（离语言切换器越近越先），那块石头下面的小字就在那一刻换。
+  var _LEAD=120;   // 波前到达前提前这么多像素开始「抹去」，使新字恰好在波前经过时写出
+  function _lbCenter(el){ var r=el.getBoundingClientRect(); return {x:r.left+r.width/2, y:r.top+r.height/2}; }
+  window.addEventListener('i18n:change', function(){
+    var reduce=false;
+    try{ reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches; }catch(e){}
+    var tok=++_subSeq;
+    if(reduce){
+      labelEls.forEach(function(el,i){ el._subTok=tok; _renderSub(crystals[i], el); _remeasure(i); });
+      return;
+    }
+    var t0=performance.now(), pending={}, left=labelEls.length, virt=null, last=t0;
+    labelEls.forEach(function(el,i){ el._subTok=tok; pending[i]=true; });
+    (function watch(now){
+      if(tok!==_subSeq || !left) return;                      // 被新一轮接管 / 全部完成
+      var dt=Math.min(64, now-last); last=now;
+      var ref=window._langWave, ss=window._sceneState, rad=-1, ox, oy, ended=false;
+      var alive = ref && ss && ss.shockWaves && ss.shockWaves.indexOf(ref.w)>=0;
+      if(ref && (alive || ref.t>=t0-30)){                     // 真实涟漪
+        rad=ref.w.radius; ox=ref.x; oy=ref.y; ended=!alive;
+      } else if(now-t0>1500){                                 // 没发波（如冷却/无 WebGL）：以同样速度虚拟一圈
+        if(!virt){
+          var ch=document.getElementById('langCur'); ch=ch&&ch.parentNode;
+          var cr0=ch?ch.getBoundingClientRect():{left:innerWidth/2,top:0,width:0,height:0};
+          virt={x:cr0.left+cr0.width/2, y:cr0.top+cr0.height/2, radius:0, speed:7.5};
+        }
+        virt.radius+=virt.speed*dt/(1000/60); rad=virt.radius; ox=virt.x; oy=virt.y;
+      }
+      if(rad>=0){
+        labelEls.forEach(function(el,i){
+          if(!pending[i]) return;
+          var c=_lbCenter(el), d=Math.hypot(c.x-ox, c.y-oy);
+          if(ended || rad>=d-_LEAD){ pending[i]=false; left--; _swapSub(i,tok); }
+        });
+      }
+      if(left) requestAnimationFrame(watch);
+    })(t0);
+  });
+  var _subSeq=0;
 
   // ── Staggered label blur reveal ──
   // All labels — including corner (about/blog) — start blurred and clear at independent times.
@@ -11629,7 +11735,9 @@ document.addEventListener('keydown', e => {
       langSettle._lastWave = _nowW;
       var big = Math.max(window.innerWidth, window.innerHeight);
       var jit = 0.92 + Math.random() * 0.16;           // 速度带一点随机，连切几次不会完全一样
-      ss.shockWaves.push({ x:x, y:y, radius:0, maxRadius:big * 0.62, strength:0.75, speed:7.5 * jit, ca:0 });
+      var _mainWave = { x:x, y:y, radius:0, maxRadius:big * 0.62, strength:0.75, speed:7.5 * jit, ca:0 };
+      ss.shockWaves.push(_mainWave);
+      window._langWave = { w:_mainWave, x:x, y:y, t:_nowW };   // 石头标签按这圈波的真实半径同频换字
       setTimeout(function(){
         ss.shockWaves.push({ x:x, y:y, radius:0, maxRadius:big * 0.5, strength:0.3, speed:6.2 * jit, ca:0 });
       }, 230);
