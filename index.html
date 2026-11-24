@@ -12245,7 +12245,7 @@ document.addEventListener('keydown', e => {
         var sh=el.querySelector('.gi-shine'); el.insertBefore(veil, sh||null); }
       var img=el.querySelector('img');
       if(img) img.style.setProperty('--pi-f',STATIC_F);
-      return {el:el, img:img, veil:veil, lit:.4, sc:.95, ap:0, fk:0, rot0:(((i*53)%7)-3)*.4,
+      return {el:el, img:img, veil:veil, lit:.4, sc:.95, fs:.95, hv:1, hv1:1, in:false, ap:0, rot0:(((i*53)%7)-3)*.4,
               ph:i*1.9+.7, sp:.55+((i*3)%4)*.11, vo:-1, wc:false, cy0:0, h:0, l0:0, w:0};
     });
     geoDirty=true; kick();
@@ -12262,20 +12262,26 @@ document.addEventListener('keydown', e => {
   }
   function kick(){ if(!raf) raf=requestAnimationFrame(tick); }
   function frozenGlobal(){ return !!(window._lbIsOn||window._lbFlying); }
+  // 时间常数平滑（与帧率无关）
+  function ease(cur,target,tau,dt){ return cur+(target-cur)*(1-Math.exp(-dt/tau)); }
+  var lastT=0, holdUntil=0, lastCur=null;
   function neutral(c){
-    c.lit=1; c.sc=1; c.ap=0; c.fk=0;
+    c.lit=1; c.sc=1; c.fs=1; c.hv=1; c.hv1=1; c.ap=0; c.in=false;
     c.el.style.scale='1'; c.el.style.translate='0 0px'; c.el.style.rotate='0deg';
     if(c.veil) c.veil.style.opacity='0'; c.vo=0;
   }
   function tick(){
     raf=0;
-    if(!panel.classList.contains('on')||!cards.length) return;
+    if(!panel.classList.contains('on')||!cards.length){ lastT=0; return; }
     if(geoDirty) measure();
     var vh=window.innerHeight, vc=vh*.52, busy=false, now=performance.now();
+    var gap=now-lastT, dt=(!lastT||gap>100)?.016:gap/1000; lastT=now;
     var st=inner.scrollTop, it=inner.getBoundingClientRect().top;     // 每帧只读这一次
     var fg=frozenGlobal(), curEl=null, tm=now/1000, mouseOn=mx>-1000&&window.innerWidth>768;
     if(fg){ try{ var tt=window._lbThumbOf(window.curLbIdx); curEl=tt&&tt.closest?tt.closest('.gx-card'):null; }catch(e){} }   // 只有被打开的这一张需要回正
-    if(lastFrozen&&!fg) busy=true; lastFrozen=fg;
+    if(curEl) lastCur=curEl;
+    if(lastFrozen&&!fg){ busy=true; holdUntil=now+160; }   // 灯箱落地后先稳住一小会儿（缩略图交接完成），再缓缓恢复漂浮
+    lastFrozen=fg;
     var reads=[];
     for(var i=0;i<cards.length;i++){
       var c=cards[i], cy=c.cy0-st+it;                 // 布局中心（视口坐标）
@@ -12283,22 +12289,33 @@ document.addEventListener('keydown', e => {
       if(!vis){ if(c.wc){ c.el.style.willChange=''; c.wc=false; } continue; }
       if(!c.wc){ c.el.style.willChange='scale,translate,rotate'; c.wc=true; }
       var pressed=(pressCard===c.el&&now-pressT<1600), frozen=(curEl===c.el);
+      var held=(now<holdUntil&&c.el===lastCur);
       var f=clamp(1-Math.abs(cy-vc)/(vh*.62),0,1); f=f*f*(3-2*f);
       var ml=0, inside=false;
       if(mouseOn){
-        var x0=c.l0, x1=c.l0+c.w, y0=cy-c.h/2, y1=cy+c.h/2;
+        var m=c.in?10:0;                               // 滞回：已在悬停时边界外扩 10px，鼠标在边缘不会来回抖
+        var x0=c.l0-m, x1=c.l0+c.w+m, y0=cy-c.h/2-m, y1=cy+c.h/2+m;
         var dx=Math.max(x0-mx,0,mx-x1), dy=Math.max(y0-my,0,my-y1);
         inside=(dx===0&&dy===0);
         ml=clamp(1-Math.hypot(dx,dy)/280,0,1); ml=ml*ml*(3-2*ml);
       }
-      var calm=reduce||frozen||pressed||inside;        // 悬停 / 按下 / 灯箱：回正
+      c.in=inside;
+      // ── 「回正程度」hv：0=漂浮倾斜，1=完全回正。两级串联平滑 → S 形曲线（起步柔、收尾柔）
+      //    悬停回正约 0.4s；松开 / 灯箱回来后恢复漂浮约 1.1s；点击按下仍然很快（灯箱要量真实矩形）
+      var calmT=(reduce||frozen||pressed||held||inside)?1:0;
+      var tauC=calmT?((frozen||pressed)?.05:.11):.30;
+      c.hv1=ease(c.hv1,calmT,tauC,dt);
+      c.hv =ease(c.hv ,c.hv1,tauC,dt);
+      // 缩放：漂浮时的景深缩放 fs 与回正按 hv 混合，不再瞬间切目标值
+      var fsT=.945+.055*f;
+      c.fs=ease(c.fs,fsT,.14,dt);
+      c.sc=c.fs+(1-c.fs)*c.hv;
+      // 明暗：变亮较快，变暗（回到漂浮）更慢，和位移节奏一致
       var tl=(reduce||frozen||pressed)?1:Math.max(f*.82,ml);
-      var ts=calm?1:.945+.055*f;
-      var fkT=calm?0:1, rate=pressed?.5:(calm?.18:.035);   // 回正快，恢复漂浮慢（约 1 秒），衔接柔和
-      c.lit+=(tl-c.lit)*.14; c.sc+=(ts-c.sc)*.16; c.fk+=(fkT-c.fk)*rate;
-      if(Math.abs(tl-c.lit)>.004||Math.abs(ts-c.sc)>.001||Math.abs(fkT-c.fk)>.004) busy=true;
-      var fy=0, fr=0;
-      if(!reduce){ fy=Math.sin(tm*c.sp+c.ph)*9*c.fk; fr=(c.rot0+Math.sin(tm*c.sp*.7+c.ph*1.3)*.6)*c.fk; busy=true; }
+      c.lit=ease(c.lit,tl,tl<c.lit?.30:.14,dt);
+      if(Math.abs(tl-c.lit)>.004||Math.abs(fsT-c.fs)>.001||Math.abs(calmT-c.hv)>.004) busy=true;
+      var fk=1-c.hv, fy=0, fr=0;
+      if(!reduce){ fy=Math.sin(tm*c.sp+c.ph)*9*fk; fr=(c.rot0+Math.sin(tm*c.sp*.7+c.ph*1.3)*.6)*fk; busy=true; }
       c.ap=fy;
       var vo=((1-c.lit)*.5);
       reads.push(c); c._fy=fy; c._fr=fr; c._vo=vo;
