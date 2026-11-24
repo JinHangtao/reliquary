@@ -1141,8 +1141,8 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 /* ══ 顶部雾化：纯粹的渐进模糊，没有任何暗色/边线 ══
    8 层极轻的 backdrop-filter（最大 4.5px），各自用渐变遮罩错开，叠出连续的朦胧感；
    高度随滚动由 --tb(0→1) 长出来，停在顶部时不存在。 */
-#panel .panel-topblur{ position:sticky; top:0; z-index:5; flex:none; align-self:stretch; height:0; pointer-events:none; --tb-h:130px; }
-#panel .panel-topblur .tb{ position:absolute; left:var(--tb-x,0px); width:var(--tb-w,100%); right:auto; top:0; height:calc(var(--tb,0) * var(--tb-h)); pointer-events:none; }
+#panel .panel-topblur{ position:sticky; top:0; z-index:5; flex:none; align-self:stretch; height:0; pointer-events:none; --tb-h:88px; }
+#panel .panel-topblur .tb{ position:absolute; left:var(--tb-x,0px); width:var(--tb-w,100%); right:auto; top:-14px; height:calc(var(--tb,0) * (var(--tb-h) + 14px)); pointer-events:none; will-change:transform; }
 #panel .panel-topblur .tb i{ position:absolute; inset:0; }
 #panel .panel-topblur .tb i:nth-child(1){ -webkit-backdrop-filter:blur(0.3px); backdrop-filter:blur(0.3px); --mv:linear-gradient(to top,transparent 0%,#000 10.0%,#000 20.0%,transparent 30.0%); }
 #panel .panel-topblur .tb i:nth-child(2){ -webkit-backdrop-filter:blur(0.7px); backdrop-filter:blur(0.7px); --mv:linear-gradient(to top,transparent 10.0%,#000 20.0%,#000 30.0%,transparent 40.0%); }
@@ -5581,7 +5581,11 @@ window._sceneState = {
     // If written separately they overwrite each other → title jumps/flickers.
     _plxTitle.style.transform = 'translate3d('+tx+'px,'+ty+'px,0) scale('+_plx.titleScale.toFixed(4)+')';
     _plxBody.style.transform  = 'translate3d('+bx+'px,'+by+'px,0)';
+    window._plxOff = {x:bx, y:by};
+    if(!_plxFog) _plxFog = document.querySelector('#panel .panel-topblur .tb');
+    if(_plxFog) _plxFog.style.transform = 'translate3d('+bx+'px,'+by+'px,0)';   // 黑幕跟正文同步漂移
   }
+  var _plxFog = null;
 
   function _plxMouseMove(e){
     if(window._lbFlying || document.getElementById('lb').classList.contains('on')) return;   // 灯箱期间面板视差冻结，缩略图不漂移
@@ -5609,6 +5613,10 @@ window._sceneState = {
     // Preserve the current scroll-scale when resetting parallax offset to 0
     _plxTitle.style.transform  = 'translate3d(0,0,0) scale('+_plx.titleScale.toFixed(4)+')';
     _plxBody.style.transform   = _reset;
+    window._plxOff = {x:0, y:0};
+    if(!_plxFog) _plxFog = document.querySelector('#panel .panel-topblur .tb');
+    if(_plxFog){ _plxFog.style.transition = 'transform 0.4s cubic-bezier(.4,0,.2,1)'; _plxFog.style.transform = _reset;
+      setTimeout(function(){ _plxFog.style.transition = ''; }, 420); }
     setTimeout(function(){
       _plxEye.style.transition   = '';
       _plxTitle.style.transition = '';
@@ -12154,11 +12162,11 @@ document.addEventListener('keydown', e => {
     var tb=inner.querySelector('.panel-topblur .tb'); if(!tb) return;
     if(window.innerWidth<=768){ tb.style.removeProperty('--tb-x'); tb.style.removeProperty('--tb-w'); return; }
     var imgs=inner.querySelectorAll('#panelBody [data-lbidx]');
-    var ir=inner.getBoundingClientRect(), l=Infinity, r=-Infinity;
+    var ir=inner.getBoundingClientRect(), l=Infinity, r=-Infinity, ox=(window._plxOff&&window._plxOff.x)||0;
     for(var k=0;k<imgs.length;k++){
       var b=imgs[k].getBoundingClientRect();
       if(!b.width) continue;
-      if(b.left<l) l=b.left; if(b.right>r) r=b.right;
+      if(b.left-ox<l) l=b.left-ox; if(b.right-ox>r) r=b.right-ox;
     }
     if(!isFinite(l)){ tb.style.removeProperty('--tb-x'); tb.style.removeProperty('--tb-w'); return; }
     var pad=24, x=Math.max(0,l-ir.left-pad), w=Math.min(ir.width-x, r-l+pad*2);
