@@ -4901,25 +4901,60 @@ window._sceneState = {
     if(sec.images && sec.images.length){
       var isTwoCol = sec.id === 'painting' || sec.id === 'stmt';
       // 策展式排布：首张通栏主图，其后 7/5、5/7、4/4/4 交替，同一行内作品错位下沉；窄屏自动降级
-      var _gxPlan = (function(n, compact){
-        // 每一行的宽度、起始列、下沉量都轮换变化：参差、不工整，但仍在 12 列网格内
-        var V3 = [[4,4,4],[5,3,4],[3,5,4],[4,3,5]], O3 = [[0,56,18],[24,0,64],[0,72,30],[40,12,80]];
-        var V2 = [[[5,1],[4,8]],[[4,3],[5,8]],[[5,2],[4,7]],[[4,1],[5,8]]], O2 = [[0,84],[56,0],[0,100],[70,10]];
-        var seq = compact ? [3] : [1,2,3,1,2,3], out = [], si = 0, v = 0;
-        while(out.length < n){
-          var kind = seq[si++ % seq.length], left = n - out.length;
-          if(left < kind) kind = left;
-          if(kind === 1){ out.push([12,12,0,'auto']); continue; }
-          if(kind === 2){
-            var a2 = V2[v % 4], o2 = O2[v % 4]; v++;
-            out.push([a2[0][0],6,o2[0],a2[0][1]]); out.push([a2[1][0],6,o2[1],a2[1][1]]);
-          } else {
-            var a3 = V3[v % 4], o3 = O3[v % 4]; v++;
-            for(var k = 0; k < 3; k++) out.push([a3[k], compact ? 6 : (k === 2 ? 12 : 6), o3[k], 'auto']);
+      var _gxPlan = (function(n, compact, secId){
+        // 随机策展式排布：每个作品区（每块石头）、每次打开预览页都重新生成，不再是固定轮换表。
+        // 仍在 12 列网格内：每行 1~3 张，宽度 / 起始列 / 下沉量全部随机；保证不重叠、不错行；窄屏自动降级。
+        var R = Math.random;
+        function ri(a,b){ return a + Math.floor(R()*(b-a+1)); }
+        function rowOf(k){                       // 一行 k 张：随机宽度 + 随机留白（首张起点≤3，末张起点≥4，保证网格自动换行正确）
+          var w, sum, t = 0;
+          do{
+            w = []; sum = 0;
+            for(var i = 0; i < k; i++){ var x = (k === 2) ? ri(4,7) : ri(3,5); w.push(x); sum += x; }
+          } while((sum > 12 || 12 - sum > (k === 2 ? 4 : 3)) && ++t < 40);
+          if(sum > 12){ w = (k === 2) ? [6,6] : [4,4,4]; sum = 12; }
+          var slots = []; for(var s = 0; s <= k; s++) slots.push(0);
+          for(var f = 12 - sum; f > 0; f--){
+            var c; do{ c = ri(0,k); } while(c === 0 && slots[0] >= 2);   // 左侧留白最多 2 列
+            slots[c]++;
           }
+          var cur = 1 + slots[0], offs = [], base = ri(0,k-1), res = [];
+          for(var j = 0; j < k; j++){
+            var off = (j === base || R() < .22) ? 0 : ri(14,100);          // 总有一张贴基线，其余随机下沉
+            res.push([w[j], 6, off, cur]);
+            cur += w[j] + slots[j+1];
+          }
+          if(!compact && k === 3) res[ri(0,2)][1] = 12;                    // ≤900px 时 3 张一行里随机一张通栏
+          return res;
         }
-        return out;
-      })(sec.images.length, isTwoCol);
+        function gen(){
+          var out = [], prev = 0;
+          while(out.length < n){
+            var left = n - out.length, kind;
+            if(compact){ kind = R() < .7 ? 3 : 2; }
+            else if(out.length === 0){ kind = R() < .55 ? 1 : (R() < .5 ? 2 : 3); }
+            else if(prev === 1){ kind = R() < .45 ? 2 : 3; }
+            else { var r = R(); kind = r < .12 ? 1 : (r < .55 ? 2 : 3); }
+            if(left === 1) kind = 1;
+            else if(left < kind) kind = left;
+            if(left - kind === 1 && kind > 1 && R() < .6) kind--;         // 尽量不让最后孤零零剩一张
+            if(kind === 1){
+              if(compact){ var sp = ri(5,7); out.push([sp, 12, ri(0,40), ri(1, Math.min(3, 13 - sp))]); }
+              else if(R() < .68) out.push([12,12,0,1]);                    // 通栏主图
+              else { var hs = ri(8,11); out.push([hs, 12, ri(0,30), R() < .5 ? 1 : 13 - hs]); }   // 偏左 / 偏右的大图
+            } else {
+              rowOf(kind).forEach(function(c){ out.push(c); });
+            }
+            prev = kind;
+          }
+          return out;
+        }
+        // 与上一次打开同一作品区时的排布不同（避免随机到一模一样）
+        var last = (window._gxLastSig = window._gxLastSig || {}), plan, sig, tries = 0;
+        do{ plan = gen(); sig = plan.join('|'); } while(last[secId] === sig && ++tries < 6);
+        last[secId] = sig;
+        return plan;
+      })(sec.images.length, isTwoCol, sec.id);
 
       html += '<div class="gx-grid">';
       sec.images.forEach(function(img, imgIdx){
@@ -12245,8 +12280,8 @@ document.addEventListener('keydown', e => {
         var sh=el.querySelector('.gi-shine'); el.insertBefore(veil, sh||null); }
       var img=el.querySelector('img');
       if(img) img.style.setProperty('--pi-f',STATIC_F);
-      return {el:el, img:img, veil:veil, lit:.4, sc:.95, fs:.95, hv:1, hv1:1, in:false, ap:0, rot0:(((i*53)%7)-3)*.4,
-              ph:i*1.9+.7, sp:.55+((i*3)%4)*.11, vo:-1, wc:false, cy0:0, h:0, l0:0, w:0};
+      return {el:el, img:img, veil:veil, lit:.4, sc:.95, fs:.95, hv:1, hv1:1, in:false, ap:0, rot0:(Math.random()*2-1)*1.2,
+              ph:Math.random()*6.28, sp:.55+((i*3)%4)*.11, vo:-1, wc:false, cy0:0, h:0, l0:0, w:0};
     });
     geoDirty=true; kick();
   }
