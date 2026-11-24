@@ -9134,6 +9134,18 @@ var _lbEaseFn = (function(){            // cubic-bezier(.32,.72,0,1)
 })();
 function _lbLerp(a, b, k){ return a + (b - a) * k; }
 // 把 'brightness(.82) saturate(.68) contrast(1.05)' 解析成数值，便于逐帧插值（不支持的函数当作 1）
+// 缩略图上盖着一层景深暗罩 .gx-veil（不透明度随离屏幕中心的距离变化，手机上没有鼠标提亮，暗罩更重）。
+// 飞回的终点必须把这层暗罩也算进去，否则飞行图以「无暗罩」的亮度落地，交接给「带暗罩」的缩略图时，
+// 画面会先亮后暗一下 —— 手机端每次落地必现的那一闪。
+function _lbVeilK(t){
+  try{
+    var card = t && t.closest ? t.closest('.gx-card') : null;
+    var v = card && card.querySelector('.gx-veil');
+    if(!v) return 1;
+    var o = parseFloat(v.style.opacity); if(isNaN(o)) o = parseFloat(getComputedStyle(v).opacity) || 0;
+    return Math.max(0, 1 - o);     // 暗罩近似纯黑：等价于亮度 × (1-不透明度)
+  }catch(e){ return 1; }
+}
 function _lbParseFilter(str){
   var o = { b: 1, s: 1, c: 1 };
   if(!str || str === 'none') return o;
@@ -9160,7 +9172,8 @@ function _lbDriveSlow(img, t, b, dir, dur){
   var F = { tx: 0, ty: 0, s: 1, r: parseFloat(getComputedStyle(img).borderRadius) || 10 };
   if(_lbFromTf){ try{ var mx = new DOMMatrix(_lbFromTf); F.tx = mx.e; F.ty = mx.f; F.s = mx.a || 1; }catch(e){} }
 
-  var FV = _lbParseFilter(dir === 'in' ? meta.filter : (meta.rest || meta.filter));   // 缩略图端的滤镜
+  var FV = _lbParseFilter(dir === 'in' ? meta.filter : (meta.rest || meta.filter));
+  if(dir === 'out') FV.b *= _lbVeilK(t);   // 终点 = 缩略图滤镜 × 暗罩，与落地后缩略图的实际观感完全一致   // 缩略图端的滤镜
   var hasFilter = Math.abs(FV.b - 1) > .002 || Math.abs(FV.s - 1) > .002 || Math.abs(FV.c - 1) > .002;
 
   /* 滤镜（缩略图的暗色调 ⇄ 原色）交给 WAAPI：filter 是可由合成器线程驱动的属性，
@@ -9336,6 +9349,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   var M = { tx: P.tx * .5 + nx * hh, ty: P.ty * .5 + ny * hh, s: P.s + (1 - P.s) * _LB_MID_GROW };
 
   var FV = _lbParseFilter(dir === 'in' ? meta.filter : (meta.rest || meta.filter));
+  if(dir === 'out') FV.b *= _lbVeilK(t);   // 终点 = 缩略图滤镜 × 暗罩，与落地后缩略图的实际观感完全一致
   var hasFilter = Math.abs(FV.b - 1) > .002 || Math.abs(FV.s - 1) > .002 || Math.abs(FV.c - 1) > .002;
 
   var cx0 = b.left + b.width / 2, cy0 = b.top + b.height / 2, BW = b.width, BH = b.height;
