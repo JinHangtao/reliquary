@@ -9122,6 +9122,16 @@ var _lbEaseFn = (function(){            // cubic-bezier(.32,.72,0,1)
 })();
 function _lbLerp(a, b, k){ return a + (b - a) * k; }
 // 把 'brightness(.82) saturate(.68) contrast(1.05)' 解析成数值，便于逐帧插值（不支持的函数当作 1）
+/* 飞回的终点在「预览页暗幕」之下（景深压暗 + 顶部黑幕），但飞行图在灯箱层、盖在它们上面：
+   以前落地时飞行图是满亮的，交接给缩略图时才突然变暗。_lbDimK 由预览页脚本在关闭瞬间算出
+   （缩略图位置上暗幕应有的整体亮度系数），这里把它乘进飞行图的终点滤镜，
+   于是变暗跟着飞行曲线一路发生，落地时和缩略图基本一致。只影响「飞回」。 */
+window._lbDimK = 1;
+function _lbDimFV(fv, dir){
+  var k = window._lbDimK;
+  if(dir === 'out' && k > 0 && k < 1) fv.b = fv.b * k;
+  return fv;
+}
 function _lbParseFilter(str){
   var o = { b: 1, s: 1, c: 1 };
   if(!str || str === 'none') return o;
@@ -9148,7 +9158,7 @@ function _lbDriveSlow(img, t, b, dir, dur){
   var F = { tx: 0, ty: 0, s: 1, r: parseFloat(getComputedStyle(img).borderRadius) || 10 };
   if(_lbFromTf){ try{ var mx = new DOMMatrix(_lbFromTf); F.tx = mx.e; F.ty = mx.f; F.s = mx.a || 1; }catch(e){} }
 
-  var FV = _lbParseFilter(dir === 'in' ? meta.filter : (meta.rest || meta.filter));   // 缩略图端的滤镜
+  var FV = _lbDimFV(_lbParseFilter(dir === 'in' ? meta.filter : (meta.rest || meta.filter)), dir);   // 缩略图端的滤镜
   var hasFilter = Math.abs(FV.b - 1) > .002 || Math.abs(FV.s - 1) > .002 || Math.abs(FV.c - 1) > .002;
 
   /* 滤镜（缩略图的暗色调 ⇄ 原色）交给 WAAPI：filter 是可由合成器线程驱动的属性，
@@ -9323,7 +9333,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   var hh = Math.min(d * _LB_ARC_K, _LB_ARC_MAX);
   var M = { tx: P.tx * .5 + nx * hh, ty: P.ty * .5 + ny * hh, s: P.s + (1 - P.s) * _LB_MID_GROW };
 
-  var FV = _lbParseFilter(dir === 'in' ? meta.filter : (meta.rest || meta.filter));
+  var FV = _lbDimFV(_lbParseFilter(dir === 'in' ? meta.filter : (meta.rest || meta.filter)), dir);
   var hasFilter = Math.abs(FV.b - 1) > .002 || Math.abs(FV.s - 1) > .002 || Math.abs(FV.c - 1) > .002;
 
   var cx0 = b.left + b.width / 2, cy0 = b.top + b.height / 2, BW = b.width, BH = b.height;
@@ -12427,11 +12437,29 @@ document.addEventListener('keydown', e => {
   var _open=window.openLb;
   if(typeof _open==='function') window.openLb=function(idx){
     try{ var c=cardOf(idx); if(c){ neutral(c); pressCard=c.el; pressT=performance.now(); } }catch(e){}
+    mx=my=-9999;
     kick();
     return _open.apply(this,arguments);
   };
+  // 顶部黑幕（.tb::after）的纵向暗度曲线，与 CSS 渐变一致；渐变高度 = .tb 高度的 88%
+  var FOG_STOPS=[[0,.58],[.12,.555],[.25,.489],[.38,.396],[.5,.29],[.62,.184],[.75,.091],[.88,.025],[1,0]];
+  function fogAlphaAt(y,top,H){
+    var t=(y-top)/H; if(t<=0) return FOG_STOPS[0][1]; if(t>=1) return 0;
+    for(var i=1;i<FOG_STOPS.length;i++){
+      if(t<=FOG_STOPS[i][0]){ var a=FOG_STOPS[i-1], b=FOG_STOPS[i]; return a[1]+(b[1]-a[1])*(t-a[0])/(b[0]-a[0]); }
+    }
+    return 0;
+  }
+  function fogMean(y0,y1){                                  // 视口纵向区间 [y0,y1] 内黑幕的平均暗度
+    var tb=inner.querySelector('.panel-topblur .tb'); if(!tb||y1<=y0) return 0;
+    var r=tb.getBoundingClientRect(), H=r.height*.88; if(H<2) return 0;
+    var n=24, sum=0; for(var i=0;i<n;i++) sum+=fogAlphaAt(y0+(y1-y0)*(i+.5)/n, r.top, H);
+    return sum/n;
+  }
   var _fo=window._lbFlyOut;
   if(typeof _fo==='function') window._lbFlyOut=function(){
+    var k=1;
+    mx=my=-9999;                                       // 灯箱期间指针在灯箱层上，旧坐标已过期：别让它把缩略图误判成「悬停」而提亮
     try{
       var c=cardOf(window.curLbIdx);
       if(c){
@@ -12439,9 +12467,22 @@ document.addEventListener('keydown', e => {
         neutral(c,true);
         c.snap=true; c.lit=naturalLit(c);
         var vo0=(1-c.lit)*.5; c.vo=vo0; if(c.veil) c.veil.style.opacity=vo0.toFixed(3);
+        if(!reduce){
+          // 飞行图的终点亮度 = 景深压暗 ×（缩略图可见部分所在位置的黑幕平均暗度）
+          var th=c.img||(window._lbThumbOf&&window._lbThumbOf(window.curLbIdx));
+          if(th){
+            var ar=th.getBoundingClientRect(), y0=ar.top, y1=ar.bottom, vh2=window.innerHeight;
+            try{ var w=(typeof _lbWindow==='function')?_lbWindow():null; if(w){ if(w.top>y0) y0=w.top; if(w.bottom<y1) y1=w.bottom; } }catch(e){}
+            y0=Math.max(y0,0); y1=Math.min(y1,vh2);
+            k=(1-vo0)*(1-fogMean(y0,y1));
+            if(!(k>.15&&k<1)) k=(k>=1)?1:.15;
+          }
+        }
       }
-    }catch(e){}
-    return _fo.apply(this,arguments);
+    }catch(e){ k=1; }
+    window._lbDimK=k;
+    try{ return _fo.apply(this,arguments); }
+    finally{ window._lbDimK=1; }                      // 驱动器在调用瞬间已读走 k，随后复位，不影响下一次打开
   };
   body.addEventListener('pointerdown',function(e){
     var el=e.target.closest&&e.target.closest('.gx-card'); if(el){ pressCard=el; pressT=performance.now(); kick(); }
