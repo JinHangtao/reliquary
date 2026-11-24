@@ -1190,8 +1190,9 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 <style id="gx-css">
 /* ── 作品预览页：策展式排布 + 景深聚焦 + 手电筒显影 ── */
 #panelBody .gx-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:14px;row-gap:34px;align-items:start;margin-top:28px;padding-bottom:30px}
-#panelBody .gx-card{grid-column:var(--start,auto) / span var(--span,12);margin-top:var(--off,0px);will-change:scale,translate,rotate;box-shadow:0 34px 70px -28px rgba(0,0,0,.9),0 10px 24px -14px rgba(0,0,0,.6)}
+#panelBody .gx-card{grid-column:var(--start,auto) / span var(--span,12);margin-top:var(--off,0px);box-shadow:0 34px 70px -28px rgba(0,0,0,.9),0 10px 24px -14px rgba(0,0,0,.6)}
 #panelBody .gx-card img{object-position:center !important}
+#panelBody .gx-card .gx-veil{position:absolute;inset:0;z-index:1;pointer-events:none;background:#070605;opacity:.2;border-radius:inherit}
 #panelBody .gx-card[style*="--span:5"]{max-height:62vh}
 @media (max-width:900px){ #panelBody .gx-card{grid-column:auto / span var(--s2,12)} }
 @media (max-width:768px){
@@ -12221,12 +12222,16 @@ document.addEventListener('keydown', e => {
 </script>
 
 <script>
-/* 作品预览页：景深聚焦 + 手电筒显影 + 按真实比例显示 */
+/* 作品预览页：景深聚焦 + 手电筒显影 + 漂浮 + 按真实比例显示
+   性能：布局位置缓存（逐帧不再读布局）、明暗用遮罩 opacity（不再逐帧改 filter）、去掉与滚动挂钩的位移、
+        只给可视范围内的卡片开合成层。
+   灯箱衔接：点击 / 灯箱打开 / 飞行期间，卡片立即回正（无倾斜、无位移、缩放为 1），飞入飞回量到的就是真实矩形。 */
 (function(){
   var inner=document.getElementById('panelInner'), body=document.getElementById('panelBody'), panel=document.getElementById('panel');
   if(!inner||!body||!panel) return;
   var reduce=window.matchMedia('(prefers-reduced-motion:reduce)').matches;
-  var cards=[], raf=0, mx=-9999, my=-9999;
+  var cards=[], raf=0, mx=-9999, my=-9999, pressCard=null, pressT=0, geoDirty=true, lastFrozen=false;
+  var STATIC_F='brightness(1) saturate(.8) contrast(1.05)';
   function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
   function fitRatio(card){
     var im=card.querySelector('img');
@@ -12235,52 +12240,110 @@ document.addEventListener('keydown', e => {
   function collect(){
     cards=[].slice.call(body.querySelectorAll('.gx-card')).map(function(el,i){
       fitRatio(el);
-      return {el:el, img:el.querySelector('img'), lit:.35, sc:.95, ty:0, ap:0, rot0:(((i*53)%7)-3)*.4, ph:i*1.9+.7, sp:.55+((i*3)%4)*.11, k:.04+((i*7)%5)*.012, w:''};
+      var veil=el.querySelector('.gx-veil');
+      if(!veil){ veil=document.createElement('i'); veil.className='gx-veil'; veil.setAttribute('aria-hidden','true');
+        var sh=el.querySelector('.gi-shine'); el.insertBefore(veil, sh||null); }
+      var img=el.querySelector('img');
+      if(img) img.style.setProperty('--pi-f',STATIC_F);
+      return {el:el, img:img, veil:veil, lit:.4, sc:.95, ap:0, fk:0, rot0:(((i*53)%7)-3)*.4,
+              ph:i*1.9+.7, sp:.55+((i*3)%4)*.11, vo:-1, wc:false, cy0:0, h:0, l0:0, w:0};
     });
-    kick();
+    geoDirty=true; kick();
+  }
+  // 布局缓存：量一次，之后逐帧只做算术
+  function measure(){
+    geoDirty=false;
+    var st=inner.scrollTop, it=inner.getBoundingClientRect().top;
+    for(var i=0;i<cards.length;i++){
+      var c=cards[i], r=c.el.getBoundingClientRect();
+      c.cy0=r.top+r.height/2-c.ap+st-it;      // 扣掉当前位移 → 纯布局中心（旋转/缩放不改变中心）
+      c.h=c.el.offsetHeight; c.w=c.el.offsetWidth; c.l0=r.left+r.width/2-c.w/2;
+    }
   }
   function kick(){ if(!raf) raf=requestAnimationFrame(tick); }
+  function frozenGlobal(){ return !!(window._lbIsOn||window._lbFlying); }
+  function neutral(c){
+    c.lit=1; c.sc=1; c.ap=0; c.fk=0;
+    c.el.style.scale='1'; c.el.style.translate='0 0px'; c.el.style.rotate='0deg';
+    if(c.veil) c.veil.style.opacity='0'; c.vo=0;
+  }
   function tick(){
     raf=0;
     if(!panel.classList.contains('on')||!cards.length) return;
-    var vh=window.innerHeight, vc=vh*.52, busy=false, narrow=window.innerWidth<=768;
+    if(geoDirty) measure();
+    var vh=window.innerHeight, vc=vh*.52, busy=false, now=performance.now();
+    var st=inner.scrollTop, it=inner.getBoundingClientRect().top;     // 每帧只读这一次
+    var frozen=frozenGlobal(), tm=now/1000, mouseOn=mx>-1000&&window.innerWidth>768;
+    if(lastFrozen&&!frozen) busy=true; lastFrozen=frozen;
+    var reads=[];
     for(var i=0;i<cards.length;i++){
-      var c=cards[i], r=c.el.getBoundingClientRect();
-      if(r.bottom<-250||r.top>vh+250) continue;
-      var cy=r.top+r.height/2-c.ap;
+      var c=cards[i], cy=c.cy0-st+it;                 // 布局中心（视口坐标）
+      var vis=!(cy+c.h/2<-vh*.7||cy-c.h/2>vh*1.7);
+      if(!vis){ if(c.wc){ c.el.style.willChange=''; c.wc=false; } continue; }
+      if(!c.wc){ c.el.style.willChange='scale,translate,rotate'; c.wc=true; }
+      var pressed=(pressCard===c.el&&now-pressT<1600);
       var f=clamp(1-Math.abs(cy-vc)/(vh*.62),0,1); f=f*f*(3-2*f);
-      var ml=0;
-      if(!narrow && mx>-1000){
-        var dx=Math.max(r.left-mx,0,mx-r.right), dy=Math.max(r.top-my,0,my-r.bottom);
+      var ml=0, inside=false;
+      if(mouseOn){
+        var x0=c.l0, x1=c.l0+c.w, y0=cy-c.h/2, y1=cy+c.h/2;
+        var dx=Math.max(x0-mx,0,mx-x1), dy=Math.max(y0-my,0,my-y1);
+        inside=(dx===0&&dy===0);
         ml=clamp(1-Math.hypot(dx,dy)/280,0,1); ml=ml*ml*(3-2*ml);
       }
-      var tl=reduce?1:Math.max(f*.82,ml), ts=reduce?1:.945+.055*f, tt=(reduce||narrow)?0:clamp((cy-vc)*c.k,-70,70);
-      c.lit+=(tl-c.lit)*.14; c.sc+=(ts-c.sc)*.14; c.ty+=(tt-c.ty)*.14;
-      if(Math.abs(tl-c.lit)>.003||Math.abs(ts-c.sc)>.0008||Math.abs(tt-c.ty)>.15) busy=true;
-      if(c.img){
-        var w='brightness('+(.5+.5*c.lit).toFixed(3)+') saturate('+(.4+.6*c.lit).toFixed(3)+') contrast(1.05)';
-        if(w!==c.w){ c.w=w; c.img.style.setProperty('--pi-f',w); }
-      }
-      // 漂浮：每张作品相位、速度各不相同，缓慢上下浮动并轻微摇摆
+      var calm=reduce||frozen||pressed||inside;        // 悬停 / 按下 / 灯箱：回正
+      var tl=(reduce||frozen||pressed)?1:Math.max(f*.82,ml);
+      var ts=calm?1:.945+.055*f;
+      var fkT=calm?0:1, rate=pressed?.5:(calm?.18:.05);
+      c.lit+=(tl-c.lit)*.14; c.sc+=(ts-c.sc)*.16; c.fk+=(fkT-c.fk)*rate;
+      if(Math.abs(tl-c.lit)>.004||Math.abs(ts-c.sc)>.001||Math.abs(fkT-c.fk)>.004) busy=true;
       var fy=0, fr=0;
-      if(!reduce){ var tm=performance.now()/1000; fy=Math.sin(tm*c.sp+c.ph)*9; fr=Math.sin(tm*c.sp*.7+c.ph*1.3)*.6; }
-      c.ap=c.ty+fy;
-      c.el.style.scale=c.sc.toFixed(4);
-      c.el.style.translate='0 '+c.ap.toFixed(2)+'px';
-      c.el.style.rotate=(c.rot0+fr).toFixed(3)+'deg';
+      if(!reduce){ fy=Math.sin(tm*c.sp+c.ph)*9*c.fk; fr=(c.rot0+Math.sin(tm*c.sp*.7+c.ph*1.3)*.6)*c.fk; busy=true; }
+      c.ap=fy;
+      var vo=((1-c.lit)*.5);
+      reads.push(c); c._fy=fy; c._fr=fr; c._vo=vo;
     }
-    if(busy||!reduce) kick();
+    for(var j=0;j<reads.length;j++){                    // 只写不读
+      var d=reads[j];
+      d.el.style.scale=d.sc.toFixed(4);
+      d.el.style.translate='0 '+d._fy.toFixed(2)+'px';
+      d.el.style.rotate=d._fr.toFixed(3)+'deg';
+      if(d.veil&&Math.abs(d._vo-d.vo)>.004){ d.vo=d._vo; d.veil.style.opacity=d._vo.toFixed(3); }
+    }
+    if(busy) kick();
   }
+  // 点击 / 灯箱：立即把对应卡片回正，让飞入飞回量到的是真实矩形
+  function cardOf(idx){
+    var t=window._lbThumbOf?window._lbThumbOf(idx):null, el=t&&t.closest?t.closest('.gx-card'):null;
+    if(!el) return null;
+    for(var i=0;i<cards.length;i++) if(cards[i].el===el) return cards[i];
+    return null;
+  }
+  var _open=window.openLb;
+  if(typeof _open==='function') window.openLb=function(idx){
+    try{ var c=cardOf(idx); if(c){ neutral(c); pressCard=c.el; pressT=performance.now(); } }catch(e){}
+    kick();
+    return _open.apply(this,arguments);
+  };
+  var _fo=window._lbFlyOut;
+  if(typeof _fo==='function') window._lbFlyOut=function(){
+    try{ var c=cardOf(window.curLbIdx); if(c) neutral(c); }catch(e){}
+    return _fo.apply(this,arguments);
+  };
+  body.addEventListener('pointerdown',function(e){
+    var el=e.target.closest&&e.target.closest('.gx-card'); if(el){ pressCard=el; pressT=performance.now(); kick(); }
+  },{passive:true,capture:true});
   inner.addEventListener('scroll',kick,{passive:true});
   panel.addEventListener('pointermove',function(e){ if(e.pointerType==='touch') return; mx=e.clientX; my=e.clientY; kick(); },{passive:true});
   panel.addEventListener('pointerleave',function(){ mx=my=-9999; kick(); });
-  window.addEventListener('resize',kick);
+  window.addEventListener('resize',function(){ geoDirty=true; kick(); });
   body.addEventListener('load',function(e){
     var im=e.target; if(!im||im.tagName!=='IMG') return;
-    var card=im.closest&&im.closest('.gx-card'); if(card){ fitRatio(card); kick(); }
+    var card=im.closest&&im.closest('.gx-card'); if(card){ fitRatio(card); geoDirty=true; kick(); }
   },true);
+  if(window.ResizeObserver){ new ResizeObserver(function(){ geoDirty=true; kick(); }).observe(body); }
   new MutationObserver(function(){ requestAnimationFrame(collect); }).observe(body,{childList:true});
-  new MutationObserver(kick).observe(panel,{attributes:true,attributeFilter:['class']});
+  new MutationObserver(function(){ geoDirty=true; kick(); setTimeout(function(){ geoDirty=true; kick(); },900); }).observe(panel,{attributes:true,attributeFilter:['class']});
+  setInterval(function(){ if(frozenGlobal()!==lastFrozen) kick(); },200);   // 灯箱关闭落地后，卡片缓缓恢复漂浮
   collect();
 })();
 </script>
