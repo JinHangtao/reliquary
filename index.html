@@ -1260,6 +1260,10 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 @media (max-width:768px){
   /* [fix] 手机端：标题 / 金色小标题是静态文字，不需要常驻 GPU 层；常驻层在显存吃紧时会整块黑掉 */
   #panel .panel-hero .panel-eyebrow, #panel .panel-title{ will-change:auto !important; }
+  /* [fix] 快速上下滑时文字区整块变黑（栅格瓦片没来得及画 = checkerboard）：
+     景深暗罩 .gx-veil 每帧改 opacity，它和大图在同一层 → 每帧都让整张卡片（大图+滤镜+圆角裁剪）重新栅格化，
+     滑得快时栅格跟不上，最先露底的就是纯文字区。让暗罩自己成层，改 opacity 只由合成器处理，不再触发重绘。 */
+  #panelBody .gx-card .gx-veil{ will-change:opacity; }
 }
 </style>
 <style id="close-push-css">
@@ -12559,7 +12563,7 @@ document.addEventListener('keydown', e => {
     var k=Math.max(0,Math.min(1,(inner.scrollTop-m-6)/90));
     head.style.setProperty('--p',(k*k*(3-2*k)).toFixed(3));
     var t=Math.max(0,Math.min(1,inner.scrollTop/70));
-    inner.style.setProperty('--tb',(t*t*(3-2*t)).toFixed(3));
+    if(window.innerWidth>768) inner.style.setProperty('--tb',(t*t*(3-2*t)).toFixed(3));   // [fix] 手机端顶部磨砂不显示，别每帧改滚动容器上的自定义属性（会让整棵子树重算样式）
     fitFog();
   }
   // 黑幕横向范围 = 当前预览页所有图片的最左到最右（并排两张就是两张加起来的总宽），两侧各外扩 24px
