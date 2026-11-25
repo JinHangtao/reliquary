@@ -9108,7 +9108,7 @@ function _lbApplyCover(t){
       _cov = _a.width >= 8 && (_a.top < _w.top - .5 || _a.bottom > _w.bottom + .5 || _a.left < _w.left - .5 || _a.right > _w.right + .5);
     }catch(e){ _cov = false; }
     t.style.removeProperty('clip-path');
-    t.style.visibility = _cov ? 'hidden' : '';   // [fix] 被遮住的卡片：藏掉，避免飞行图背后叠一张
+    t.style.visibility = 'hidden';   // [fix] 手机端：飞入/飞回期间一律藏掉原缩略图，避免飞行图背后还留着一张原图（落地时由 _lbRestoreThumb 还原，飞回开头已预解码，不会黑闪）
     return;
   }
   var c = null;
