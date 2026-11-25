@@ -1205,7 +1205,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 @media (max-width:900px){ #panelBody .gx-card{grid-column:auto / span var(--s2,12)} }
 @media (max-width:768px){
   #panelBody .gx-grid{grid-template-columns:1fr;row-gap:14px}
-  #panelBody .gx-card{grid-column:1/-1;margin-top:0}
+  #panelBody .gx-card{grid-column:1/-1;margin-top:0;z-index:0}   /* [fix] iOS/手机 WebKit：overflow:hidden+圆角的卡片需要自己的层叠上下文，圆角裁剪/重绘才稳定 */
 }
 </style>
 </head>
@@ -12490,6 +12490,7 @@ document.addEventListener('keydown', e => {
     if(!panel.classList.contains('on')||!cards.length){ lastT=0; return; }
     if(geoDirty) measure();
     var vh=window.innerHeight, vc=vh*.52, busy=false, now=performance.now();
+    var M=window.innerWidth<=768;   // [fix] 手机端：不做常驻漂浮/倾斜/缩放，也不逐卡升降合成层（这是随机黑屏闪一下的来源）
     var gap=now-lastT, dt=(!lastT||gap>100)?.016:gap/1000; lastT=now;
     var st=inner.scrollTop, it=inner.getBoundingClientRect().top;     // 每帧只读这一次
     var fg=frozenGlobal(), curEl=null, tm=now/1000, mouseOn=mx>-1000&&window.innerWidth>768;
@@ -12502,7 +12503,8 @@ document.addEventListener('keydown', e => {
       var c=cards[i], cy=c.cy0-st+it;                 // 布局中心（视口坐标）
       var vis=!(cy+c.h/2<-vh*.7||cy-c.h/2>vh*1.7);
       if(!vis){ if(c.wc){ c.el.style.willChange=''; c.wc=false; } continue; }
-      if(!c.wc){ c.el.style.willChange='scale,translate,rotate'; c.wc=true; }
+      if(M){ if(c.wc){ c.el.style.willChange=''; c.wc=false; } }
+      else if(!c.wc){ c.el.style.willChange='scale,translate,rotate'; c.wc=true; }
       var pressed=(pressCard===c.el&&now-pressT<1600), frozen=(curEl===c.el), settling=(settleEl===c.el);
       var held=(now<holdUntil&&c.el===lastCur);
       var f=clamp(1-Math.abs(cy-vc)/(vh*.62),0,1); f=f*f*(3-2*f);
@@ -12525,23 +12527,26 @@ document.addEventListener('keydown', e => {
       // 缩放：漂浮时的景深缩放 fs 与回正按 hv 混合，不再瞬间切目标值
       var fsT=.945+.055*f;
       c.fs=ease(c.fs,fsT,.14,dt);
-      c.sc=c.fs+(1-c.fs)*c.hv;
+      c.sc=M?1:(c.fs+(1-c.fs)*c.hv);
       // 明暗：变亮较快，变暗（回到漂浮）更慢，和位移节奏一致
       var tl=(reduce||pressed||settling||(frozen&&!c.snap))?1:Math.max(f*.82,ml);
       if(c.snap&&(frozen||held)) c.lit=tl;                       // 退回飞行期间：直接贴到自然明暗（缩略图此时被飞行图盖着，看不到）
       else c.lit=ease(c.lit,tl,tl<c.lit?.16:.14,dt);             // 变暗不再拖 0.3s：和顶部黑幕同步
       if(Math.abs(tl-c.lit)>.004||Math.abs(fsT-c.fs)>.001||Math.abs(calmT-c.hv)>.004) busy=true;
       var fk=1-c.hv, fy=0, fr=0;
-      if(!reduce){ fy=Math.sin(tm*c.sp+c.ph)*9*fk; fr=(c.rot0+Math.sin(tm*c.sp*.7+c.ph*1.3)*.6)*fk; busy=true; }
+      if(!reduce&&!M){ fy=Math.sin(tm*c.sp+c.ph)*9*fk; fr=(c.rot0+Math.sin(tm*c.sp*.7+c.ph*1.3)*.6)*fk; busy=true; }
       c.ap=fy;
       var vo=((1-c.lit)*.5);
       reads.push(c); c._fy=fy; c._fr=fr; c._vo=vo;
     }
     for(var j=0;j<reads.length;j++){                    // 只写不读
       var d=reads[j];
-      d.el.style.scale=d.sc.toFixed(4);
-      d.el.style.translate='0 '+d._fy.toFixed(2)+'px';
-      d.el.style.rotate=d._fr.toFixed(3)+'deg';
+      if(M){ if(d.el.style.scale||d.el.style.translate||d.el.style.rotate){ d.el.style.scale=''; d.el.style.translate=''; d.el.style.rotate=''; } }
+      else{
+        d.el.style.scale=d.sc.toFixed(4);
+        d.el.style.translate='0 '+d._fy.toFixed(2)+'px';
+        d.el.style.rotate=d._fr.toFixed(3)+'deg';
+      }
       if(d.veil&&Math.abs(d._vo-d.vo)>.004){ d.vo=d._vo; d.veil.style.opacity=d._vo.toFixed(3); }
     }
     if(busy) kick();
