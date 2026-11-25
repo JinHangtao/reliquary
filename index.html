@@ -1256,6 +1256,12 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
   #panel .panel-body{ padding-right:max(54px, calc(env(safe-area-inset-right,0px) + 52px)); }
 }
 </style>
+<style id="hero-layer-fix">
+@media (max-width:768px){
+  /* [fix] 手机端：标题 / 金色小标题是静态文字，不需要常驻 GPU 层；常驻层在显存吃紧时会整块黑掉 */
+  #panel .panel-hero .panel-eyebrow, #panel .panel-title{ will-change:auto !important; }
+}
+</style>
 <style id="close-push-css">
 /* ══ [mobile] × 随内容上推，穿出抽屉顶边，停在抽屉上方的空条里，并逐渐变淡 ══
    起点 = 标题那一行；往下滚时它跟着标题一起上移，越过抽屉顶边后停在「安全区 + 10px」处（抽屉外）。
@@ -5366,7 +5372,7 @@ window._sceneState = {
       _panelInner.scrollTop = 0;
       _panelHead.classList.remove('scrolled');
       _plx.titleScale = 1.0;
-      if(_panelTitle) _panelTitle.style.transform = 'translate3d(0,0,0) scale(1)';
+      if(_panelTitle) _panelTitle.style.transform = isMobile ? 'none' : 'translate3d(0,0,0) scale(1)';   // [fix] 手机端：纯静态文字不强制升 GPU 层（显存紧张时整块层会被回收 → 标题/介绍变黑）
 
       // Range over which title shrinks from scale(1) → scale(_scaleMin)
       var _shrinkEnd = isMobile ? 60 : 120;
@@ -5418,7 +5424,7 @@ window._sceneState = {
             _plx._lx = _plx.cx + 1; // invalidate last position → tick will write
           } else {
             // No parallax (mobile or panel just opened) — write directly
-            if(_panelTitle) _panelTitle.style.transform = 'translate3d(0,0,0) scale(1)';
+            if(_panelTitle) _panelTitle.style.transform = isMobile ? 'none' : 'translate3d(0,0,0) scale(1)';
           }
 
           // ── Close button: shrink with same progress curve, gentler range ──
@@ -5546,6 +5552,10 @@ window._sceneState = {
       setTimeout(function(){ elem.style.opacity = '1'; elem.style.transform = 'translateY(0)'; }, delay);
     }
 
+    var _staggerCleanup = function(elem, delay){
+      if(!isMobile) return;
+      setTimeout(function(){ if(elem.style.opacity === '1'){ elem.style.transform = ''; elem.style.transition = ''; elem.style.willChange = ''; } }, delay + 700);   // [fix] 揭示结束后撤掉内联 transform：介绍文字不再长期占一个独立合成层
+    };
     _directChildren.forEach(function(el){
       // Image grid: stagger each thumb individually
       var thumbs = el.querySelectorAll ? el.querySelectorAll('[data-lbidx]') : [];
@@ -5579,6 +5589,7 @@ window._sceneState = {
 
       // Everything else (body text, quote, pills, links row): fade in as a block
       _staggerIn(el, _staggerDelay);
+      _staggerCleanup(el, _staggerDelay);
       _staggerDelay += 52;
     });
 
