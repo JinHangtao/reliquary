@@ -1255,31 +1255,33 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 <style id="close-push-css">
 /* ══ [mobile] × 随内容上推，穿出抽屉顶边，停在抽屉上方的空条里，并逐渐变淡 ══
    起点 = 标题那一行；往下滚时它跟着标题一起上移，越过抽屉顶边后停在「安全区 + 10px」处（抽屉外）。
-   位置 / 淡化进度由页面末尾脚本每帧写入（--out：0=在标题行，1=已推到抽屉外）。 */
+   位置 / 淡化进度由页面末尾脚本每帧写入（--out：0=在标题行，1=已推到抽屉外）。
+   点开大图时 × 不再单独淡出 / 重新淡入（不再套用 lb-hide / lb-return）：它就留在抽屉上，随灯箱幕布一起被盖住。 */
 @media (max-width:768px){
   .panel-inner{ height:min(91dvh, calc(100dvh - env(safe-area-inset-top,0px) - 56px)); }   /* 抽屉上方固定留出空条 */
   #panel .panel-head{ position:relative; top:auto; }                                      /* 只当位置锚点，随内容滚动 */
   #panel > .panel-close{
     --vis:0; --out:0;
     position:absolute; z-index:10; margin:0 !important; padding:0;
-    top:calc(env(safe-area-inset-top,0px) + 10px); right:8px;
-    width:36px; height:36px; border-radius:50%;
+    top:calc(env(safe-area-inset-top,0px) + 10px);
+    right:calc(8px + 2px * var(--out));
+    width:calc(36px - 4px * var(--out)); height:calc(36px - 4px * var(--out)); border-radius:50%;
     transform:none !important;
-    border:1px solid rgba(255,255,255,calc(.12 * (1 - .75 * var(--out))));
-    background:rgba(255,255,255,calc(.045 * (1 - var(--out))));
-    -webkit-backdrop-filter:none; backdrop-filter:none; box-shadow:none;
+    /* 现代感：半透明玻璃圆 + 极细高光描边 + 柔和阴影；推到抽屉外后整体更淡 */
+    border:.5px solid rgba(255,255,255,calc(.24 - .12 * var(--out)));
+    background:linear-gradient(180deg, rgba(255,255,255,calc(.13 - .06 * var(--out))), rgba(255,255,255,calc(.05 - .02 * var(--out))));
+    -webkit-backdrop-filter:blur(14px) saturate(1.5); backdrop-filter:blur(14px) saturate(1.5);
+    box-shadow:inset 0 .5px 0 rgba(255,255,255,calc(.28 - .14 * var(--out))), 0 6px 20px rgba(0,0,0,calc(.34 - .14 * var(--out)));
     opacity:var(--vis); pointer-events:none; will-change:translate;
     transition:opacity .22s ease, scale .22s cubic-bezier(.22,1,.36,1);
     -webkit-tap-highlight-color:transparent;
   }
   #panel.on > .panel-close{ --vis:1; pointer-events:auto; }
-  #panel.on.lb-hide > .panel-close{ --vis:0; pointer-events:none; transition:opacity .1s linear; }
-  #panel.on.lb-return > .panel-close{ animation:closeReturn .55s cubic-bezier(.22,1,.36,1) both; }
   #panel > .panel-close::before{ display:none; }
   #panel > .panel-close:active{ scale:.9; }
-  #panel > .panel-close svg{ opacity:calc(1 - .6 * var(--out)); }                          /* 推出去之后 × 更透明、不显眼 */
-  #panel > .panel-close .cl-ghost{ stroke:rgba(245,241,232,.78); opacity:1; }
-  #panel > .panel-close .cl-line{ stroke:rgba(245,241,232,.95); }
+  #panel > .panel-close svg{ width:11px; height:11px; opacity:calc(1 - .45 * var(--out)); }   /* 推出去之后 × 更淡 */
+  #panel > .panel-close .cl-ghost{ stroke:rgba(245,241,232,.92); stroke-width:1.5; opacity:1; }
+  #panel > .panel-close .cl-line{ stroke:rgba(245,241,232,.95); stroke-width:1.5; }
 }
 </style>
 </head>
