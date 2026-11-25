@@ -1207,141 +1207,6 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
   #panelBody .gx-card{grid-column:1/-1;margin-top:0}
 }
 </style>
-
-<style id="ios-refined-control-system">
-/* ==========================================================
-   Refined tactile controls — iOS-inspired, adapted to this site
-   One coherent press language; no global layout or scene changes.
-   ========================================================== */
-:root{
-  --ui-press-ease:cubic-bezier(.22,1,.36,1);
-  --ui-press-fast:140ms;
-  --ui-press-release:380ms;
-  --ui-press-gold:rgba(212,168,90,.22);
-}
-
-/* Shared baseline: keep each control's own geometry and typography. */
-button,
-[role="button"],
-.ident-trigger{
-  -webkit-tap-highlight-color:transparent;
-  -webkit-touch-callout:none;
-  touch-action:manipulation;
-  user-select:none;
-  -webkit-user-select:none;
-  transform-origin:center;
-  transition:scale var(--ui-press-release) var(--ui-press-ease);
-}
-
-/* The press is immediate and restrained; release eases out like a damped spring.
-   Use the individual scale property so existing transform-based choreography survives. */
-button:active,
-[role="button"]:active,
-.ident-trigger:active{
-  scale:.965;
-  transition-duration:var(--ui-press-fast);
-  transition-timing-function:cubic-bezier(.32,0,.2,1);
-}
-
-/* Desktop hover is deliberately quiet; touch devices never inherit sticky hover. */
-@media (hover:hover) and (pointer:fine){
-  button:not(:disabled):hover,
-  [role="button"]:not([aria-disabled="true"]):hover{
-    border-color:rgba(212,168,90,.34);
-  }
-}
-
-/* Keyboard users get a visible but restrained focus treatment. */
-button:focus-visible,
-[role="button"]:focus-visible,
-.ident-trigger:focus-visible,
-.lang-item:focus-visible{
-  outline:1px solid rgba(212,168,90,.58);
-  outline-offset:3px;
-}
-
-/* Main close control: tactile press without the old abrupt 0.9 shrink. */
-#panel .panel-head .panel-close{
-  transition:
-    scale 360ms var(--ui-press-ease),
-    border-color 220ms var(--ui-press-ease),
-    background-color 220ms var(--ui-press-ease),
-    box-shadow 220ms var(--ui-press-ease);
-}
-#panel .panel-head .panel-close:active{
-  scale:.94;
-  background:rgba(212,168,90,.075);
-  border-color:rgba(212,168,90,.42);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.045);
-}
-
-/* Lightbox controls: preserve the 22px visual design, expand the actual touch target. */
-.lb-btns button{
-  position:relative;
-  isolation:isolate;
-  transition:
-    scale 360ms var(--ui-press-ease),
-    color 220ms var(--ui-press-ease),
-    border-color 220ms var(--ui-press-ease),
-    background-color 220ms var(--ui-press-ease),
-    box-shadow 220ms var(--ui-press-ease),
-    opacity .34s cubic-bezier(.4,0,.2,1),
-    transform .34s cubic-bezier(.4,0,.2,1);
-}
-.lb-btns button::before{
-  content:"";
-  position:absolute;
-  inset:-11px;
-  border-radius:12px;
-  z-index:-1;
-}
-.lb-btns button:active{
-  scale:.92;
-  color:var(--gold);
-  border-color:rgba(212,168,90,.62);
-  background:rgba(212,168,90,.09);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.055);
-}
-
-/* Language trigger: tiny physical response, but no layout movement. */
-.ident-trigger:active{scale:.985;}
-.lang-item:active{
-  transform:translateX(1px);
-  background:rgba(212,168,90,.10);
-  border-radius:11px;
-}
-
-/* A disabled control must not pretend to respond. */
-button:disabled,
-[aria-disabled="true"]{
-  cursor:default;
-  scale:1;
-  opacity:.42;
-}
-
-/* Keep the interaction responsive for reduced-motion users. */
-@media (prefers-reduced-motion:reduce){
-  button,
-  [role="button"],
-  .ident-trigger,
-  #panel .panel-head .panel-close,
-  .lb-btns button{
-    transition-duration:1ms !important;
-  }
-  button:active,
-  [role="button"]:active,
-  .ident-trigger:active,
-  #panel .panel-head .panel-close:active,
-  .lb-btns button:active{scale:1;}
-}
-
-/* Touch-first sizing: preserve the visual footprint while making tiny icon controls easier to hit. */
-@media (pointer:coarse){
-  #panel .panel-head .panel-close{min-width:44px;min-height:44px;}
-  .lb-btns button{min-width:30px;min-height:30px;}
-}
-</style>
-
 </head>
 <body>
 
@@ -9753,8 +9618,19 @@ function _lbFlyOut(){
           try{ anim.cancel(); }catch(e){}
           if(_lbAnimBox){ try{ _lbAnimBox.cancel(); }catch(e){} _lbAnimBox = null; }
           _lbFromTf = '';
-          _lbFlyState(false);
-          requestAnimationFrame(function(){ if(!_lbIsOn) _lbReleaseCap(); });   // 飞行图撤掉后的下一帧再放开小介绍，避免与缩略图显现同帧「弹出」
+          if(_narrow){
+            /* 手机端：飞行图撤掉的这一帧，不能同时有别的事发生。_lbFlyState(false) 会同时让 ① Three.js 恢复整屏渲染（首帧很重）
+               ② 卡片漂浮系统解冻 ③ 面板各类定时任务恢复 —— 主线程一卡，合成器就可能在「缩略图尚未稳定栅格化」时出一帧，
+               表现为整张卡片闪一下。所以手机端把这些全部延后到落地稳定之后（期间 _lbFlying 仍为 true，卡片保持回正静止）。 */
+            setTimeout(function(){
+              if(_lbIsOn || _lbAnim || _lbTail) return;   // 期间又开/关了灯箱：交给新的流程自己管理
+              _lbFlyState(false);
+              requestAnimationFrame(function(){ if(!_lbIsOn) _lbReleaseCap(); });
+            }, 320);
+          } else {
+            _lbFlyState(false);
+            requestAnimationFrame(function(){ if(!_lbIsOn) _lbReleaseCap(); });   // 飞行图撤掉后的下一帧再放开小介绍，避免与缩略图显现同帧「弹出」
+          }
           if(th){                                    // 滤镜交还给 CSS：静止态无变化；仍在 hover 时 .4s 平滑过渡
             // 不在此刻降层：.pi-done 的 will-change:auto 会让缩略图此时「掉出」合成层并重新栅格化，
             // 被 tab 栏磨砂层（backdrop-filter）盖住的那一截会因此重采样、闪一下。留到下次打开灯箱时再还原。
