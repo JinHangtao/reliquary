@@ -8853,6 +8853,8 @@ var _lbThumb = null;   // 当前被隐藏的缩略图 <img>
 var _lbTok   = 0;      // 防竞态 token
 var _lbFromTf = '';
 function _lbFlyState(on){
+  if(!on && window._DBG_NORESUME && window._lbFlying){ (window._dbg&&window._dbg('flyState(false) 被调试开关拦截'));return; }
+  (window._dbg&&window._dbg('flyState('+(!!on)+')'));
   window._lbFlying = !!on;
   var e = document.getElementById('lb'); if(e) e.classList.toggle('lb-flying', !!on);
 }    // 飞回的起点 transform（灯箱里放大 / 平移过时 = 当时的内联 transform，否则空）
@@ -9340,6 +9342,7 @@ function _lbDriveSlow(img, t, b, dir, dur){
    想对比效果：控制台执行 window._LB_FAST = false 即可切回旧方案。 */
 function _lbDriveFast(img, t, b, dir, dur){
   if(window._LB_FAST === false || !img.animate || !t) return null;
+  (window._dbg&&window._dbg('用快速驱动 _lbDriveFast '+dir));
   var lb = document.getElementById('lb');
   var src = img.currentSrc || img.src;
   if(!lb || !src || src.indexOf('about:blank') === 0) return null;
@@ -9477,6 +9480,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   aW.onfinish = function(){
     if(h._dead || h.playState !== 'running') return;
     h.playState = 'finished';
+    (window._dbg&&window._dbg('drive '+dir+': 飞行结束(代理层接棒)'));
     if(dir === 'out'){                                  // 真图以「缩略图姿态」接棒，供原有的落地交接（淡入缩略图/淡出飞行图）使用
       img.style.transform = P.transform;
       img.style.clipPath  = P.clip;
@@ -9504,6 +9508,7 @@ function _lbDriveFast(img, t, b, dir, dur){
   function _start(){
     if(_started) return; _started = true;
     if(h._dead || h.playState !== 'running') return;
+    (window._dbg&&window._dbg('drive '+dir+': 预热结束,开始飞'));
     h.warming = false;
     if(dir === 'out') img.style.opacity = '0';          // 代理层已绘制完成，此刻才藏真图，不会漏底
     var cb = h.onWarmed; h.onWarmed = null;
@@ -9593,6 +9598,7 @@ function _lbFlyOut(){
         _lbStopTrack();
         if(_lbAnim !== anim) return;
         _lbAnim = null;
+        (window._dbg&&window._dbg('flyOut onfinish 进入落地交接', window._lbThumb||_lbThumb));
         /* ── 丝滑落地（三段式交接，修复 tab 栏磨砂区闪烁）──
            ① 缩略图滤镜钉成静止态（与飞行图终点完全一致），关掉它的 filter 过渡，避免 hover 色差
            ② 缩略图在飞行图【下方】淡入 —— 被 tab 栏遮住的那一截透过磨砂层是「渐变出现」而不是突变
@@ -9620,6 +9626,7 @@ function _lbFlyOut(){
         function _finish(){
           if(_lbTail !== tail) return;               // 已被新的打开 / 关闭接管，不再收尾
           _lbTail = null;
+          (window._dbg&&window._dbg('_finish 撤飞行图', th));
           if(tail.timer){ clearTimeout(tail.timer); tail.timer = 0; }
           if(tail.off){ tail.off(); tail.off = null; }
           if(tail.thAnim){ try{ tail.thAnim.cancel(); }catch(e){} tail.thAnim = null; }   // 提前收尾：缩略图直接回到完全不透明
@@ -9689,7 +9696,7 @@ function _lbFlyOut(){
           };
           var _goneOnce = false, _goSafe = function(){ if(_goneOnce) return; _goneOnce = true; _go(); };
           tail.timer = setTimeout(_goSafe, 600);   // 兜底：解码最久等 600ms
-          _decP.then(_goSafe);
+          _decP.then(function(){ (window._dbg&&window._dbg('缩略图预解码完成'));_goSafe(); });
           return;
         }
         tail.timer = setTimeout(function(){
@@ -9957,6 +9964,7 @@ function openLb(idx){
 function closeLb(){
   var lb = document.getElementById('lb');
   if(!lb.classList.contains('on')) return;   // 已经在关闭中，避免重复触发
+  (window._dbg&&window._dbg('closeLb',true));
   window._lbClosedAt = Date.now();           // 供 closePanel 判断：同一次 Esc 只关灯箱
   _lbStop();
   _lbTok++;                                  // 作废还在排队的飞入/侧栏淡入
@@ -9985,19 +9993,20 @@ function closeLb(){
       _lbCloseTmr = setTimeout(_cleanFn, 40);
       return;
     }
-    document.getElementById('lb').style.visibility = 'hidden';   // 立即隐藏：.lb 的 visibility 过渡有 .78s 延迟，期间重置后的空卡片会露出来
+    if(!window._DBG_NOHIDE) document.getElementById('lb').style.visibility = 'hidden';   // 立即隐藏：.lb 的 visibility 过渡有 .78s 延迟，期间重置后的空卡片会露出来
     Array.prototype.forEach.call(document.querySelectorAll('.lb-fly-proxy'), function(n){ if(n.parentNode) n.parentNode.removeChild(n); });
     var img    = document.getElementById('lbImg');
     var imgBox = document.getElementById('lbImgBox');
     var colEl  = document.querySelector('.lb-col');
     var wrapEl = document.querySelector('.lb-wrap');
+    (window._dbg&&window._dbg('_cleanFn 执行(卸灯箱层) landed='+(!!_landed)+' flying='+window._lbFlying+(window._DBG_NOHIDE?' [NOHIDE]':'')));
     var _keepFly = _landed && window._lbFlying;
     _lbCancelAnim();                                  // 内部会 _lbFlyState(false)：手机端必须保持 true，交给落地定时器在更晚的时刻恢复
     if(_keepFly) window._lbFlying = true;
     _lbRestoreThumb();
     if(window._lbResetZoom) window._lbResetZoom(true);
     img.classList.remove('lb-fadein');
-    img.src = 'about:blank'; img.style.opacity = '0';
+    if(!window._DBG_NOHIDE) img.src = 'about:blank'; img.style.opacity = '0';
     img.style.transform = ''; img.style.transition = '';
     img.style.width=''; img.style.maxWidth=''; img.style.maxHeight=''; img.style.objectFit='';
     if(imgBox) { imgBox.style.width=''; imgBox.style.clipPath=''; }
@@ -12573,6 +12582,57 @@ document.addEventListener('keydown', e => {
   new MutationObserver(function(){ geoDirty=true; kick(); setTimeout(function(){ geoDirty=true; kick(); },900); }).observe(panel,{attributes:true,attributeFilter:['class']});
   setInterval(function(){ if(frozenGlobal()!==lastFrozen) kick(); },200);   // 灯箱关闭落地后，卡片缓缓恢复漂浮
   collect();
+})();
+</script>
+<script>
+/* ══ 调试条（手机排查闪烁用）：网址后加 ?dbg=1 开启（会记住；?dbg=0 关闭）══ */
+(function(){
+  var on=false;
+  try{ var m=/[?&]dbg=(\d)/.exec(location.search); if(m){ localStorage.setItem('_dbg',m[1]); } on=localStorage.getItem('_dbg')==='1'; }catch(e){ on=/[?&]dbg=1/.test(location.search); }
+  if(!on){ window._dbg=null; return; }
+  var t0=0, lines=[], MAXL=60, ctxLost=0, longF=0;
+  var box=document.createElement('div');
+  box.style.cssText='position:fixed;left:0;right:0;top:0;z-index:2147483647;background:rgba(0,0,0,.82);color:#7CFC9A;font:10px/1.35 monospace;padding:4px 6px;max-height:42vh;overflow:auto;pointer-events:none;white-space:pre-wrap;word-break:break-all';
+  var bar=document.createElement('div');
+  bar.style.cssText='position:fixed;right:4px;top:4px;z-index:2147483647;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;max-width:70vw';
+  function btn(txt,fn){ var b=document.createElement('button'); b.textContent=txt; b.style.cssText='font:10px monospace;padding:4px 6px;background:#222;color:#fff;border:1px solid #888;border-radius:4px;pointer-events:auto'; b.addEventListener('click',function(e){e.stopPropagation(); fn(b);}); bar.appendChild(b); return b; }
+  function tog(label,key,inv){
+    var b=btn('',function(){ var v=!window[key]; if(inv) v=(window[key]===false); window[key]=inv?(window[key]===false?undefined:false):v; try{localStorage.setItem('_dbg_'+key,String(window[key]));}catch(e){} paint(); });
+    function paint(){ var act=inv?(window[key]===false):!!window[key]; b.textContent=label+(act?'：开':'：关'); b.style.background=act?'#a33':'#222'; }
+    try{ var sv=localStorage.getItem('_dbg_'+key); if(sv==='true') window[key]=true; else if(sv==='false') window[key]=false; }catch(e){}
+    paint();
+  }
+  tog('①关快速动画','_LB_FAST',true);
+  tog('②不卸灯箱','_DBG_NOHIDE');
+  tog('③不恢复Three','_DBG_NORESUME');
+  var hid=false;
+  btn('复制',function(b){ var txt=lines.join('\n'); try{ navigator.clipboard.writeText(txt).then(function(){b.textContent='已复制';setTimeout(function(){b.textContent='复制';},900);}); }catch(e){ b.textContent='无法复制'; } });
+  btn('隐藏',function(b){ hid=!hid; box.style.display=hid?'none':''; b.textContent=hid?'显示':'隐藏'; });
+  function render(){ box.textContent='[ctx丢失:'+ctxLost+' 长帧:'+longF+'] '+(navigator.userAgent.match(/(iPhone|iPad|Android[^;]*|CPU OS [\d_]+)/)||[''])[0]+' dpr'+devicePixelRatio+'\n'+lines.join('\n'); box.scrollTop=box.scrollHeight; }
+  function describe(el){
+    if(!el||!el.getBoundingClientRect) return '';
+    try{ var r=el.getBoundingClientRect(), cs=getComputedStyle(el), card=el.closest&&el.closest('.gx-card'), v=card&&card.querySelector('.gx-veil');
+      return ' | thumb '+(el.complete?'complete':'LOADING')+' nat='+el.naturalWidth+'x'+el.naturalHeight+' vis='+cs.visibility+' op='+cs.opacity+' y='+Math.round(r.top)+(v?' veil='+getComputedStyle(v).opacity:''); }catch(e){ return ''; }
+  }
+  window._dbg=function(msg,reset,el){
+    var now=performance.now();
+    if(reset){ lines=[]; t0=now; }
+    if(!t0) t0=now;
+    lines.push('+'+Math.round(now-t0)+'ms '+msg+describe(el));
+    if(lines.length>MAXL) lines.shift();
+    render();
+  };
+  // 帧间隔监视：>45ms 记一条（落地瞬间卡顿会在这里露出来）
+  var last=performance.now();
+  (function loop(){ var n=performance.now(), g=n-last; last=n; if(g>45 && t0 && n-t0<3000){ longF++; lines.push('+'+Math.round(n-t0)+'ms ⚠ 长帧 '+Math.round(g)+'ms'); if(lines.length>MAXL) lines.shift(); render(); } requestAnimationFrame(loop); })();
+  // WebGL 上下文丢失 / 恢复（手机 GPU 内存吃紧时黑屏的常见原因）
+  function watch(){ Array.prototype.forEach.call(document.querySelectorAll('canvas'),function(c){ if(c._dbgW) return; c._dbgW=1;
+    c.addEventListener('webglcontextlost',function(){ ctxLost++; window._dbg('🚨 WebGL 上下文丢失 canvas#'+(c.id||'?')); },false);
+    c.addEventListener('webglcontextrestored',function(){ window._dbg('WebGL 上下文已恢复 canvas#'+(c.id||'?')); },false); }); }
+  watch(); setTimeout(watch,1500); setTimeout(watch,5000);
+  document.addEventListener('visibilitychange',function(){ window._dbg('visibility='+document.visibilityState); });
+  document.addEventListener('DOMContentLoaded',function(){ document.body.appendChild(box); document.body.appendChild(bar); render(); });
+  if(document.body){ document.body.appendChild(box); document.body.appendChild(bar); render(); }
 })();
 </script>
 </body>
