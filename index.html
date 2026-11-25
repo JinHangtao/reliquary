@@ -1256,6 +1256,17 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
   #panel .panel-body{ padding-right:max(54px, calc(env(safe-area-inset-right,0px) + 52px)); }
 }
 </style>
+<style id="close-calm-css">
+/* ══ 电脑端预览页 ×：保留磨砂，只把变化拉慢 ══
+   · --p（滚动带来的磨砂加深：模糊半径、底色、阴影、× 亮度）注册成可过渡的数字，
+     滚动每帧写入的新值不再直接生效，而是用 0.9s 缓动慢慢追过去 —— 快速滚动时也只是缓缓加深。
+   · 压在卡片上时的深色垫底（.over-card）淡入淡出从 0.35s 拉到 1.1s，滑过图片不再一闪一闪。 */
+@property --p{ syntax:'<number>'; inherits:true; initial-value:0; }
+@media (min-width:769px){
+  #panel .panel-head{ transition:--p .9s cubic-bezier(.25,.1,.25,1); }
+  #panel .panel-head .panel-close::before{ transition:opacity 1.1s cubic-bezier(.4,0,.2,1); }
+}
+</style>
 <style id="hero-layer-fix">
 @media (max-width:768px){
   /* [fix] 手机端：标题 / 金色小标题是静态文字，不需要常驻 GPU 层；常驻层在显存吃紧时会整块黑掉 */
