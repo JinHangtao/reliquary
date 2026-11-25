@@ -1197,7 +1197,8 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
    · 电脑 / 横屏：去掉 8 层 backdrop-filter 磨砂（它们要对下面实时 WebGL 画布逐帧重采样，最耗性能），只保留 ::after 那层同色暗雾，观感基本不变；
    · 手机竖屏：整条黑幕删除（抽屉本身是整宽实底，关闭键自带玻璃质感，不需要再压一条暗带）。
    想恢复原样：删掉下面这一段即可。 */
-#panel .panel-topblur{ display:none !important; }   /* 电脑 / 横屏 / 手机：顶部黑幕与磨砂一律不显示 */
+#panel .panel-topblur .tb i{ display:none !important; }
+@media (max-width:768px){ #panel .panel-topblur{ display:none !important; } }
 </style>
 
 <style id="gx-css">
