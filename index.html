@@ -9809,7 +9809,12 @@ function _lbFlyOut(){
            这时缩略图已经显示出来并会跟着滚走，飞行图却停在原地淡出 → 同一张图出现两份，
            滚动方向上就是一道很短的「拖影」。所以交接期间只要检测到滚动，立刻收尾：
            缩略图直接不透明、飞行图马上撤掉，不再有两份图像。 */
-        var _onScr = function(){ _finish(); };
+        var _onScr = function(){
+          /* 手机端：慢淡出进行到一半时用户又去滑动 —— 飞行图不随页面滚动，必须尽快撤掉，
+             但不能硬切（硬切 = 又一次亮度跳变），改为把剩余的淡出加速到约 1/8 时长（~100ms 内收完）。 */
+          if(_narrow && fadeAnim){ try{ fadeAnim.playbackRate = 8; return; }catch(e){} }
+          _finish();
+        };
         window.addEventListener('wheel',     _onScr, { passive: true, capture: true });
         window.addEventListener('touchmove', _onScr, { passive: true, capture: true });
         window.addEventListener('scroll',    _onScr, { passive: true, capture: true });
@@ -9837,8 +9842,21 @@ function _lbFlyOut(){
             tail.timer = setTimeout(function(){
               tail.timer = 0;
               if(_lbTail !== tail) return;
-              requestAnimationFrame(function(){ requestAnimationFrame(function(){ requestAnimationFrame(_finish); }); });
-            }, 160);   // 缩略图可见后再稳定绘制一会儿，再撤飞行图
+              /* [fix 手机落地亮一下] 以前这里是「一帧内整张飞行图直接撤掉」：飞行图是高清大图 + 单独算出来的滤镜/暗罩，
+                 缩略图是另一张图 + 卡片自己的暗罩，两者终态哪怕只差 1~2% 的亮度，硬切那一帧都会被看成「亮一下」。
+                 现在改成【很慢的交叉淡出】：缩略图在下面始终完全不透明（不会有明暗起伏），飞行图在上面用 ~0.9s 缓缓淡掉，
+                 亮度只做一次单向、连续的过渡，肉眼看不出变化。时长可在控制台用 window._LB_LAND_FADE=毫秒 调整。 */
+              requestAnimationFrame(function(){ requestAnimationFrame(function(){
+                if(_lbTail !== tail) return;
+                var FADE = (window._LB_LAND_FADE > 0) ? window._LB_LAND_FADE : 900;
+                try{
+                  fadeAnim = img.animate([{ opacity: 1 }, { opacity: 0 }],
+                                         { duration: FADE, easing: 'cubic-bezier(.45,0,.25,1)', fill: 'forwards' });
+                  tail.fade = fadeAnim;
+                  fadeAnim.onfinish = function(){ _finish(); };
+                }catch(e){ _finish(); }
+              }); });
+            }, 160);   // 缩略图可见后再稳定绘制一会儿，再开始淡出飞行图
           };
           var _goneOnce = false, _goSafe = function(){ if(_goneOnce) return; _goneOnce = true; _go(); };
           tail.timer = setTimeout(_goSafe, 600);   // 兜底：解码最久等 600ms
