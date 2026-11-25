@@ -12611,57 +12611,5 @@ document.addEventListener('keydown', e => {
   collect();
 })();
 </script>
-<script>
-/* ══ 调试条（手机排查闪烁用）：网址后加 ?dbg=1 开启（会记住；?dbg=0 关闭）══ */
-(function(){
-  var on=false;
-  try{ var m=/[?&]dbg=(\d)/.exec(location.search); if(m){ localStorage.setItem('_dbg',m[1]); } on=localStorage.getItem('_dbg')==='1'; }catch(e){ on=/[?&]dbg=1/.test(location.search); }
-  if(!on){ window._dbg=null; return; }
-  var t0=0, lines=[], MAXL=60, ctxLost=0, longF=0;
-  var box=document.createElement('div');
-  box.style.cssText='position:fixed;left:0;right:0;top:0;z-index:2147483647;background:rgba(0,0,0,.82);color:#7CFC9A;font:10px/1.35 monospace;padding:4px 6px;max-height:42vh;overflow:auto;pointer-events:none;white-space:pre-wrap;word-break:break-all';
-  var bar=document.createElement('div');
-  bar.style.cssText='position:fixed;right:4px;top:4px;z-index:2147483647;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;max-width:70vw';
-  function btn(txt,fn){ var b=document.createElement('button'); b.textContent=txt; b.style.cssText='font:10px monospace;padding:4px 6px;background:#222;color:#fff;border:1px solid #888;border-radius:4px;pointer-events:auto'; b.addEventListener('click',function(e){e.stopPropagation(); fn(b);}); bar.appendChild(b); return b; }
-  function tog(label,key,inv){
-    var b=btn('',function(){ var v=!window[key]; if(inv) v=(window[key]===false); window[key]=inv?(window[key]===false?undefined:false):v; try{localStorage.setItem('_dbg_'+key,String(window[key]));}catch(e){} paint(); });
-    function paint(){ var act=inv?(window[key]===false):!!window[key]; b.textContent=label+(act?'：开':'：关'); b.style.background=act?'#a33':'#222'; }
-    try{ var sv=localStorage.getItem('_dbg_'+key); if(sv==='true') window[key]=true; else if(sv==='false') window[key]=false; }catch(e){}
-    paint();
-  }
-  tog('①关快速动画','_LB_FAST',true);
-  tog('②不卸灯箱','_DBG_NOHIDE');
-  tog('③不恢复Three','_DBG_NORESUME');
-  tog('④卡片不恢复','_DBG_NOCARDS');
-  var hid=false;
-  btn('复制',function(b){ var txt=lines.join('\n'); try{ navigator.clipboard.writeText(txt).then(function(){b.textContent='已复制';setTimeout(function(){b.textContent='复制';},900);}); }catch(e){ b.textContent='无法复制'; } });
-  btn('隐藏',function(b){ hid=!hid; box.style.display=hid?'none':''; b.textContent=hid?'显示':'隐藏'; });
-  function render(){ box.textContent='[ctx丢失:'+ctxLost+' 长帧:'+longF+'] '+(navigator.userAgent.match(/(iPhone|iPad|Android[^;]*|CPU OS [\d_]+)/)||[''])[0]+' dpr'+devicePixelRatio+'\n'+lines.join('\n'); box.scrollTop=box.scrollHeight; }
-  function describe(el){
-    if(!el||!el.getBoundingClientRect) return '';
-    try{ var r=el.getBoundingClientRect(), cs=getComputedStyle(el), card=el.closest&&el.closest('.gx-card'), v=card&&card.querySelector('.gx-veil');
-      return ' | thumb '+(el.complete?'complete':'LOADING')+' nat='+el.naturalWidth+'x'+el.naturalHeight+' vis='+cs.visibility+' op='+cs.opacity+' y='+Math.round(r.top)+(v?' veil='+getComputedStyle(v).opacity:''); }catch(e){ return ''; }
-  }
-  window._dbg=function(msg,reset,el){
-    var now=performance.now();
-    if(reset){ lines=[]; t0=now; }
-    if(!t0) t0=now;
-    lines.push('+'+Math.round(now-t0)+'ms '+msg+describe(el));
-    if(lines.length>MAXL) lines.shift();
-    render();
-  };
-  // 帧间隔监视：>45ms 记一条（落地瞬间卡顿会在这里露出来）
-  var last=performance.now();
-  (function loop(){ var n=performance.now(), g=n-last; last=n; if(g>45 && t0 && n-t0<3000){ longF++; lines.push('+'+Math.round(n-t0)+'ms ⚠ 长帧 '+Math.round(g)+'ms'); if(lines.length>MAXL) lines.shift(); render(); } requestAnimationFrame(loop); })();
-  // WebGL 上下文丢失 / 恢复（手机 GPU 内存吃紧时黑屏的常见原因）
-  function watch(){ Array.prototype.forEach.call(document.querySelectorAll('canvas'),function(c){ if(c._dbgW) return; c._dbgW=1;
-    c.addEventListener('webglcontextlost',function(){ ctxLost++; window._dbg('🚨 WebGL 上下文丢失 canvas#'+(c.id||'?')); },false);
-    c.addEventListener('webglcontextrestored',function(){ window._dbg('WebGL 上下文已恢复 canvas#'+(c.id||'?')); },false); }); }
-  watch(); setTimeout(watch,1500); setTimeout(watch,5000);
-  document.addEventListener('visibilitychange',function(){ window._dbg('visibility='+document.visibilityState); });
-  document.addEventListener('DOMContentLoaded',function(){ document.body.appendChild(box); document.body.appendChild(bar); render(); });
-  if(document.body){ document.body.appendChild(box); document.body.appendChild(bar); render(); }
-})();
-</script>
 </body>
 </html>
