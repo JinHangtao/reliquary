@@ -1252,19 +1252,34 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
   #panel .panel-body{ padding-right:max(54px, calc(env(safe-area-inset-right,0px) + 52px)); }
 }
 </style>
-<style id="close-inline-css">
-/* ══ [mobile] × 回到标题那一行，随内容滚走（不吸顶）══
-   手机端 × 属于抽屉内容的一部分：和抽屉一起升起，往下滚时跟着标题滚走。
-   卡片都在标题下面，× 在布局上不可能再与图片重叠，飞入飞回也与它无关。
-   滚到下面想关：点抽屉上方的暗区、或回到顶部下滑即可。 */
+<style id="close-push-css">
+/* ══ [mobile] × 随内容上推，穿出抽屉顶边，停在抽屉上方的空条里，并逐渐变淡 ══
+   起点 = 标题那一行；往下滚时它跟着标题一起上移，越过抽屉顶边后停在「安全区 + 10px」处（抽屉外）。
+   位置 / 淡化进度由页面末尾脚本每帧写入（--out：0=在标题行，1=已推到抽屉外）。 */
 @media (max-width:768px){
-  #panel .panel-head{ position:relative; top:auto; }
-  #panel .panel-head .panel-close{
-    -webkit-backdrop-filter:none; backdrop-filter:none;          /* 不再压在内容上，不需要毛玻璃 */
-    background:rgba(255,255,255,.04);
-    border-color:rgba(255,255,255,.12);
+  .panel-inner{ height:min(91dvh, calc(100dvh - env(safe-area-inset-top,0px) - 56px)); }   /* 抽屉上方固定留出空条 */
+  #panel .panel-head{ position:relative; top:auto; }                                      /* 只当位置锚点，随内容滚动 */
+  #panel > .panel-close{
+    --vis:0; --out:0;
+    position:absolute; z-index:10; margin:0 !important; padding:0;
+    top:calc(env(safe-area-inset-top,0px) + 10px); right:8px;
+    width:36px; height:36px; border-radius:50%;
+    transform:none !important;
+    border:1px solid rgba(255,255,255,calc(.12 * (1 - .75 * var(--out))));
+    background:rgba(255,255,255,calc(.045 * (1 - var(--out))));
+    -webkit-backdrop-filter:none; backdrop-filter:none; box-shadow:none;
+    opacity:var(--vis); pointer-events:none; will-change:translate;
+    transition:opacity .22s ease, scale .22s cubic-bezier(.22,1,.36,1);
+    -webkit-tap-highlight-color:transparent;
   }
-  #panel .panel-head .panel-close::before{ display:none; }       /* 不再需要「压卡片时垫玻璃」 */
+  #panel.on > .panel-close{ --vis:1; pointer-events:auto; }
+  #panel.on.lb-hide > .panel-close{ --vis:0; pointer-events:none; transition:opacity .1s linear; }
+  #panel.on.lb-return > .panel-close{ animation:closeReturn .55s cubic-bezier(.22,1,.36,1) both; }
+  #panel > .panel-close::before{ display:none; }
+  #panel > .panel-close:active{ scale:.9; }
+  #panel > .panel-close svg{ opacity:calc(1 - .6 * var(--out)); }                          /* 推出去之后 × 更透明、不显眼 */
+  #panel > .panel-close .cl-ghost{ stroke:rgba(245,241,232,.78); opacity:1; }
+  #panel > .panel-close .cl-line{ stroke:rgba(245,241,232,.95); }
 }
 </style>
 </head>
@@ -12748,5 +12763,44 @@ document.addEventListener('keydown', e => {
 })();
 </script>
 
+<script>
+/* [mobile] × 随内容上推出抽屉：≤768px 时 × 搬到 #panel 下，每帧按标题行位置计算它的 translate */
+(function(){
+  var btn=document.getElementById('panelClose'), panel=document.getElementById('panel');
+  var inner=document.getElementById('panelInner'), head=panel&&panel.querySelector('.panel-head');
+  if(!btn||!panel||!inner||!head) return;
+  var home=btn.parentNode, mq=window.matchMedia('(max-width:768px)');
+  var restTop=0, stopAt=0, running=false;
+  function measure(){ restTop=btn.offsetTop||0; }
+  function tick(){
+    if(!mq.matches){ running=false; return; }
+    var d=Math.max(0, head.getBoundingClientRect().top + 20 - restTop);      // 20 = 原 × 在标题行里的 top
+    var D0=inner.offsetTop + head.offsetTop + 20 - restTop;                   // 抽屉停稳、未滚动时的距离
+    var k=D0>1 ? Math.min(1, Math.max(0, 1 - d/D0)) : 1;
+    btn.style.translate='0px '+d.toFixed(1)+'px';
+    btn.style.setProperty('--out', k.toFixed(3));
+    if(panel.classList.contains('on') || Date.now()<stopAt) requestAnimationFrame(tick); else running=false;
+  }
+  function kick(){
+    if(!mq.matches) return;
+    measure();
+    if(!panel.classList.contains('on')) stopAt=Date.now()+900;                 // 收起时再跟 0.9s，× 随抽屉一起下去
+    if(!running){ running=true; requestAnimationFrame(tick); }
+  }
+  function place(){
+    if(mq.matches){
+      if(btn.parentNode!==panel) panel.appendChild(btn);
+      kick();
+    } else {
+      if(home && btn.parentNode!==home) home.appendChild(btn);
+      btn.style.removeProperty('translate'); btn.style.removeProperty('--out');
+    }
+  }
+  new MutationObserver(kick).observe(panel,{attributes:true,attributeFilter:['class']});
+  window.addEventListener('resize',function(){ measure(); kick(); },{passive:true});
+  if(mq.addEventListener) mq.addEventListener('change',place); else if(mq.addListener) mq.addListener(place);
+  place();
+})();
+</script>
 </body>
 </html>
