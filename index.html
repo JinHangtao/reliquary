@@ -2909,7 +2909,7 @@ window._sceneState = {
 
   var bgShiftX = 0, bgShiftTarget = 0;
   (function bgTick(){
-    if(window._lbOpen || window._lbFlying){ requestAnimationFrame(bgTick); return; }
+    if((window._lbOpen || window._lbFlying) && document.body.classList.contains('panel-open')){ requestAnimationFrame(bgTick); return; }   // [fix] 抽屉已关就不能再暂停，否则镜头/背景回位被灯箱飞回的收尾期卡住
     bgCx += (bgTx - bgCx) * 0.025;
     bgCy += (bgTy - bgCy) * 0.025;
     if(!isMob){
@@ -7844,7 +7844,7 @@ resetIdleTimer();
 
   function animate(){
     requestAnimationFrame(animate);
-    if(window._lbOpen || window._lbFlying){
+    if((window._lbOpen || window._lbFlying) && document.body.classList.contains('panel-open')){   // [fix] 抽屉已关（panel-open 已摘）时场景必须照常渲染：手机端 _lbFlying 要等落地交接+560ms 才复位，期间关抽屉会让镜头回位卡住 2-3s
       // [fix 手机黑屏] 灯箱期间若发生过 resize（手机地址栏/工具栏收放会触发），#bg / #three / #constellation 的画布已被清空，
       // 而暂停的主循环不会重画 → 飞回落地时露出黑底，直到 _lbFlying 复位才恢复。有脏标记就补画这一帧。
       if(!window._lbResizeDirty){ clock.getDelta(); return; }
