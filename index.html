@@ -12578,7 +12578,7 @@ document.addEventListener('keydown', e => {
           后面的卡片整体被顶下去（加载/待机重试/懒加载时都可能触发）。
      现在：① 每张卡片只允许改一次比例，之后锁死；② 'noGrow' 模式下卡片高度永远不会超过初始占位（竖图改为裁切显示）。
      GX_RATIO_MODE：'noGrow'（默认，只会变矮不会变高） | 'fixed'（完全不改，占位多大就多大） | 'real'（旧行为，按真实比例） */
-  var GX_RATIO_MODE='noGrow';
+  var GX_RATIO_MODE='fixed';
   function fitRatio(card){
     if(card.getAttribute('data-gx-ratio')) return;               // 已锁定：绝不再改
     var im=card.querySelector('img');
