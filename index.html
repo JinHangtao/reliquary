@@ -12620,7 +12620,7 @@ document.addEventListener('keydown', e => {
       c.in=inside;
       // ── 「回正程度」hv：0=漂浮倾斜，1=完全回正。两级串联平滑 → S 形曲线（起步柔、收尾柔）
       //    悬停回正约 0.4s；松开 / 灯箱回来后恢复漂浮约 1.1s；点击按下仍然很快（灯箱要量真实矩形）
-      if(c.snap&&!frozen&&!held){ c.snap=false; c.snapLit=null; c.soft=now+800; busy=true; }
+      if(c.snap&&!frozen&&!held){ c.snap=false; c.snapLit=null; c.soft=now+1200; busy=true; }
       var calmT=(reduce||frozen||pressed||held||inside||settling)?1:0;
       var tauC=calmT?(settling?.03:((frozen||pressed)?.05:.11)):.30;
       c.hv1=ease(c.hv1,calmT,tauC,dt);
@@ -12635,7 +12635,7 @@ document.addEventListener('keydown', e => {
       else{
         // [patch] 交接结束后的 ~0.8s 内用更柔和对称的时间常数，从「落地明暗」平滑过渡到当前目标（只走一个方向，不再亮暗来回）
         var soft=(c.soft&&now<c.soft);
-        c.lit=ease(c.lit,tl,soft?.24:(tl<c.lit?.16:.14),dt);
+        c.lit=ease(c.lit,tl,soft?.34:(tl<c.lit?.16:.14),dt);
       }
       if(Math.abs(tl-c.lit)>.004||Math.abs(fsT-c.fs)>.001||Math.abs(calmT-c.hv)>.004) busy=true;
       var fk=1-c.hv, fy=0, fr=0;
@@ -12695,6 +12695,7 @@ document.addEventListener('keydown', e => {
       if(c){
         pressCard=null;                                   // 1.6s 内关灯箱时，按下态不能再把卡片强行提亮
         neutral(c,true);
+        if(lastPtr!=='touch'&&pgx>-1000){ mx=pgx; my=pgy; }   // [patch] 用真实鼠标位置
         c.snap=true; c.lit=naturalLit(c); c.snapLit=c.lit; c.soft=0;   // [patch] 钉住落地明暗：飞行图终点滤镜就是按这个值算的
         var vo0=(1-c.lit)*.5; c.vo=vo0; if(c.veil) c.veil.style.opacity=vo0.toFixed(3);
       }
@@ -12708,7 +12709,16 @@ document.addEventListener('keydown', e => {
   },{passive:true,capture:true});
   inner.addEventListener('scroll',kick,{passive:true});
   panel.addEventListener('pointermove',function(e){ if(e.pointerType==='touch') return; mx=e.clientX; my=e.clientY; kick(); },{passive:true});
-  panel.addEventListener('pointerleave',function(){ mx=my=-9999; kick(); });
+  // [patch] 灯箱期间鼠标离开面板会把 mx 清成 -9999 → 飞回落地时被当作「没悬停」→ 先暗，鼠标一动才变亮。
+  //         改为：全局记住真实鼠标位置；灯箱打开 / 飞行 / 交接期间不清除，落地时按真实位置算明暗，一次到位。
+  var pgx=-9999, pgy=-9999;
+  function lbBusy(){ var l=document.getElementById('lb'); return !!(window._lbIsOn||window._lbFlying||window._lbCardHold||(l&&l.classList.contains('on'))); }
+  document.addEventListener('pointermove',function(e){
+    if(e.pointerType==='touch') return;
+    pgx=e.clientX; pgy=e.clientY;
+    if(lbBusy()){ mx=pgx; my=pgy; }          // 灯箱盖着时面板自己收不到，这里代为更新
+  },{passive:true,capture:true});
+  panel.addEventListener('pointerleave',function(){ if(lbBusy()) return; mx=my=-9999; kick(); });
   window.addEventListener('resize',function(){ geoDirty=true; kick(); });
   body.addEventListener('load',function(e){
     var im=e.target; if(!im||im.tagName!=='IMG') return;
