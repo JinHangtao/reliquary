@@ -9558,6 +9558,12 @@ function _lbFlyIn(idx, tok){
 function _lbFlyOut(){
   var img = document.getElementById('lbImg');
   var t   = _lbThumbOf(curLbIdx);
+  /* 手机端：缩略图在灯箱期间一直 visibility:hidden，浏览器会丢掉它的解码数据；落地时才重新解码，
+     来不及的话飞行图一撤就露出卡片黑底 = 「整张卡片变黑一下」。飞回一开始就预解码，飞行 300ms 足够完成。 */
+  window._lbThDec = null;
+  if(window.innerWidth <= 768 && t && t.decode){
+    try{ window._lbThDec = t.decode().catch(function(){}); }catch(e){ window._lbThDec = null; }
+  }
   _lbCancelAnim();
   if(t && t === _lbThumb) _lbApplyCover(t);   // 页面可能滚过：按此刻位置重算「被遮住的那一截」
   // 切图后 img 带着 .lb-fadein（CSS animation, fill:both 会一直把 opacity 钉在 1，
@@ -9665,11 +9671,18 @@ function _lbFlyOut(){
         if(_narrow){
           /* 手机端落地：缩略图此刻已在飞行图下方完整显示（静止、不透明）。等它稳定绘制几帧，
              再把飞行图一次撤掉 —— 两者终态（含暗罩）已对齐，下方什么都不再变化。 */
-          tail.timer = setTimeout(function(){
-            tail.timer = 0;
+          var _decP = window._lbThDec || Promise.resolve();
+          var _go = function(){
             if(_lbTail !== tail) return;
-            requestAnimationFrame(function(){ requestAnimationFrame(function(){ requestAnimationFrame(_finish); }); });
-          }, 90);
+            tail.timer = setTimeout(function(){
+              tail.timer = 0;
+              if(_lbTail !== tail) return;
+              requestAnimationFrame(function(){ requestAnimationFrame(function(){ requestAnimationFrame(_finish); }); });
+            }, 160);   // 缩略图可见后再稳定绘制一会儿，再撤飞行图
+          };
+          var _goneOnce = false, _goSafe = function(){ if(_goneOnce) return; _goneOnce = true; _go(); };
+          tail.timer = setTimeout(_goSafe, 600);   // 兜底：解码最久等 600ms
+          _decP.then(_goSafe);
           return;
         }
         tail.timer = setTimeout(function(){
