@@ -5673,6 +5673,7 @@ window._sceneState = {
 
     // 关闭：从当前位置顺滑滑出屏幕，再真正关闭面板
     function _swFlingClose(){
+      if(window._lbSettleNow) window._lbSettleNow();   // [fix] 下滑关抽屉：同上
       _swClosing = true;
       window._swPull = 1; _swFastFor(1600);             // 镜头立即开始快速回到全景
       _swStopRaf();
@@ -5875,6 +5876,7 @@ window._sceneState = {
     if(Date.now() - _panelOpenedAt < 350) return;
     // 灯箱开着（或刚被同一次 Esc 关掉）时，只关灯箱，不连带关面板
     if(document.getElementById('lb').classList.contains('on') || Date.now() - (window._lbClosedAt || 0) < 120) return;
+    if(window._lbSettleNow) window._lbSettleNow();   // [fix] 灯箱飞行图还在半空/淡出时，先收尾，别让它停在原地
     _plxStop(); // stop content parallax and reset transforms
     var _burstCl = _burstOn() && panelEl.classList.contains('on');
     var _burstXY = _burstCl ? (focusCr ? _stoneXY(focusCr) : {x:_bInner.getBoundingClientRect().left, y:window.innerHeight/2}) : null;
@@ -9171,6 +9173,14 @@ function _lbCancelTail(){
     t.th.style.removeProperty('filter');
   }
 }
+// [fix] 抽屉退出时，灯箱「飞回 / 落地交接」若还没结束，飞行图（position:fixed）不会跟着抽屉走，
+// 会停在原地慢慢淡出（手机端落地淡出 ~0.9s）。关抽屉前把它立刻收尾：飞行图撤掉，缩略图随抽屉一起退。
+window._lbSettleNow = function(){
+  try{
+    if(_lbAnim){ var a = _lbAnim; var h = a.onfinish; if(h){ a.onfinish = null; try{ h.call(a); }catch(e){} } }   // 飞行途中：直接进入交接
+    var t = _lbTail; if(t && t.finish) t.finish();
+  }catch(e){}
+};
 function _lbCancelAnim(){
   _lbCancelTail();
   _lbStopTrack();
@@ -9767,6 +9777,7 @@ function _lbFlyOut(){
               不会在淡入的同时抢帧；交接完成后才恢复 */
         var th = _lbThumb, IN = 180, OUT = 170, OVERLAP = 60, _partial = _lbThumbPartial, _narrow = window.innerWidth <= 768;
         var tail = _lbTail = { fade: null, th: th, timer: 0, thAnim: null, off: null };
+        tail.finish = function(){ _finish(); };   // [fix] 供关抽屉时立刻收尾：飞行图是 position:fixed，不随抽屉走
         var restF = 'none';
         if(th){
           var tm = _lbThumbMeta(th);
