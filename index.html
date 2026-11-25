@@ -986,8 +986,12 @@ body::after {
   animation:piSweep 1.9s cubic-bezier(.4,0,.2,1) infinite;}
 @keyframes piSweep{from{transform:translateX(0)}to{transform:translateX(200%)}}
 .pi-skel.pi-out{opacity:0;}
-.pi-wrap{position:relative;overflow:hidden;min-height:180px;}
-.pi-wrap.pi-ready{min-height:0;}
+.pi-wrap{position:relative;overflow:hidden;}  /* 高度由 JS 设置的 aspect-ratio 决定：骨架屏 / 加载中 / 加载后始终同一高度，不再跳动 */
+.pi-wrap.pi-guess{aspect-ratio:16/10;}           /* 实在不知道比例时的占位比例（首次加载后会记住真实比例） */
+.pi-wrap.pi-grow{transition:aspect-ratio .55s cubic-bezier(.32,.72,0,1);}
+[data-exp="0"] .pi-wrap.pi-grow{transition:visibility 0s linear .52s,aspect-ratio .55s cubic-bezier(.32,.72,0,1);}
+[data-exp="1"] .pi-wrap.pi-grow{transition:visibility 0s,aspect-ratio .55s cubic-bezier(.32,.72,0,1);}
+.pi-wrap>img.pi{width:100%;height:100%;object-fit:cover;display:block;}
 img.pi{--pi-f:brightness(1);position:relative;z-index:0;opacity:0;transform:scale(1.025);
   filter:blur(14px) var(--pi-f);will-change:opacity,filter,transform;
   transition:opacity .6s cubic-bezier(.32,.72,0,1),filter .85s cubic-bezier(.32,.72,0,1),transform .95s cubic-bezier(.32,.72,0,1)!important;}
@@ -4545,6 +4549,24 @@ window._sceneState = {
   // 本次会话里「已经加载完」的图片：key = 原始 src。持有 Image 对象让浏览器把它留在内存缓存里，
   // 再次打开同一个面板时：直接同步出图，不再出现骨架屏、不再排队逐张加载、不再淡入。
   var _piKeep = {};
+  // ── 图片宽高比：让卡片从一开始就是最终高度，加载完不再「嘣」一下 ──
+  // 优先级：① <img width height> 属性  ② window.IMG_RATIOS[文件名] = [宽,高]（可选，手动/脚本生成）
+  //        ③ localStorage 里记住的真实比例（访问过一次之后永远不跳）  ④ 16/10 占位，加载后平滑过渡到真实比例
+  window.IMG_RATIOS = window.IMG_RATIOS || {};
+  function _piKnownRatio(img, key){
+    var w = img.getAttribute('width'), h = img.getAttribute('height');
+    if(w && h && +w > 0 && +h > 0) return (+w) + ' / ' + (+h);
+    var fn = key.replace(/^.*\//, ''), t = window.IMG_RATIOS[fn] || window.IMG_RATIOS[key];
+    if(t && t[0] > 0 && t[1] > 0) return t[0] + ' / ' + t[1];
+    try{ var c = localStorage.getItem('piR:' + key); if(c) return c; }catch(_e){}
+    return null;
+  }
+  function _piLearnRatio(img, slot, key){
+    if(!img.naturalWidth || !img.naturalHeight) return;
+    var r = img.naturalWidth + ' / ' + img.naturalHeight;
+    if(slot.style.aspectRatio !== r) slot.style.aspectRatio = r;
+    try{ localStorage.setItem('piR:' + key, r); }catch(_e){}
+  }
   function _bindProgressiveImages(root){
     root.querySelectorAll('img').forEach(function(img){
       if(img.dataset.pi) return;
@@ -4568,6 +4590,12 @@ window._sceneState = {
         slot.appendChild(img);
         img.style.margin = '0';
         wrapped = true;
+        // 先把槽位的高度定死（见上方 ratio 说明），图片只负责填满它
+        var _kr = _piKnownRatio(img, _piKey);
+        if(_kr){ slot.style.aspectRatio = _kr; }
+        else { slot.classList.add('pi-guess', 'pi-grow'); }
+        img.style.height = '100%';
+        img.style.objectFit = 'cover';
       }
 
       // 2) Move the original inline filter into a CSS var so blur can animate on top of it
@@ -4582,7 +4610,7 @@ window._sceneState = {
         // 已加载过：立刻显示，无骨架、无淡入
         if(img.getAttribute('data-src')){ img.removeAttribute('data-src'); img.src = _thumbSrc(_piKey); }
         img.classList.add('pi-in','pi-done');
-        if(wrapped) slot.classList.add('pi-ready');
+        if(wrapped){ slot.classList.add('pi-ready'); slot.classList.remove('pi-grow'); _piLearnRatio(img, slot, _piKey); }
         return;
       }
 
@@ -4594,12 +4622,13 @@ window._sceneState = {
       function reveal(){
         if(shown) return; shown = true;
         // let the hidden state paint first, so the transition always runs
+        if(wrapped) _piLearnRatio(img, slot, _piKey);   // 真实比例在淡入的同时平滑过渡（已知比例时无变化）
         requestAnimationFrame(function(){ requestAnimationFrame(function(){
           img.classList.add('pi-in');
           skel.classList.add('pi-out');
           if(wrapped) slot.classList.add('pi-ready');
           setTimeout(function(){ if(skel.parentNode) skel.parentNode.removeChild(skel); }, 800);
-          setTimeout(function(){ img.classList.add('pi-done'); }, 1100);
+          setTimeout(function(){ img.classList.add('pi-done'); if(wrapped) slot.classList.remove('pi-grow'); }, 1100);
         }); });
       }
       function ready(){
