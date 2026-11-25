@@ -3144,6 +3144,7 @@ window._sceneState = {
       ]
     },
   ];
+  window.__SECTIONS = SECTIONS;   // 只读引用：给后台预加载脚本收集资源地址用
 
   var W = window.innerWidth, H = window.innerHeight;
   // Canvas is rendered 8vw wider than the viewport (4vw buffer on each side).
@@ -12912,6 +12913,111 @@ document.addEventListener('keydown', e => {
   window.addEventListener('resize',function(){ measure(); kick(); },{passive:true});
   if(mq.addEventListener) mq.addEventListener('change',place); else if(mq.addListener) mq.addListener(place);
   place();
+})();
+</script>
+
+<script>
+/* ══ 后台错峰预加载 ══
+   进站、入场动画结束后，在浏览器空闲时一个一个把各作品区的图片「只下载、不解码」进 HTTP 缓存。
+   之后点开石头，图片直接从本地缓存取，不用再等网络；解码仍由原来的逐张队列负责，所以不会增加首屏和拖动时的卡顿。
+   策略：
+   · 只下载不解码（不创建 Image / 不进 GPU），内存和主线程几乎无压力
+   · 手机 1 路并发、电脑 2 路；每张之间留出空档，且只在空闲时取下一张
+   · 低优先级（fetch priority:low），用户自己点开的面板图片永远优先
+   · 面板打开 / 页面在后台 / 省流量模式 / 2G 网络 时自动暂停或不启动
+   · 音频只在电脑 + 4G 时预载；视频默认不预载（体积大），想开把 PRELOAD_CFG.video 改成 true  */
+(function(){
+  var CFG = window.PRELOAD_CFG = Object.assign({
+    images: true,
+    audio:  'desktop',   // true=全部设备 / 'desktop'=只电脑 / false=不预载
+    video:  false,
+    startDelay: 1200     // 入场完成后再等多久开始（ms）
+  }, window.PRELOAD_CFG || {});
+
+  var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if(conn && (conn.saveData || /(^|-)2g$/.test(conn.effectiveType||''))) return;   // 省流量 / 2G：不预载
+
+  var isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  var mobile  = isTouch && window.innerWidth <= 768;
+  var fastNet = !conn || !conn.effectiveType || conn.effectiveType === '4g';
+  var MAX_PAR = mobile ? 1 : 2;
+  var GAP     = mobile ? 220 : 90;
+
+  // ── 收集地址：按作品区顺序遍历数据，图片优先，其次音频、视频 ──
+  function collect(){
+    var img=[], aud=[], vid=[], seen={};
+    (function walk(o, d){
+      if(!o || d > 8) return;
+      if(typeof o === 'string'){
+        if(o.length > 300 || /[<>\s]{2}/.test(o) && o.indexOf('/') < 0) return;
+        if(!/^(?:\.?\/)?[^:?#]+\.(png|jpe?g|webp|avif|gif|mp3|m4a|mp4|webm)$/i.test(o)) return;   // 只要站内相对路径
+        if(seen[o]) return; seen[o] = 1;
+        if(/\.(png|jpe?g|webp|avif|gif)$/i.test(o)) img.push(o);
+        else if(/\.(mp3|m4a)$/i.test(o)) aud.push(o);
+        else vid.push(o);
+        return;
+      }
+      if(Array.isArray(o)){ o.forEach(function(v){ walk(v, d+1); }); return; }
+      if(typeof o === 'object'){ Object.keys(o).forEach(function(k){ walk(o[k], d+1); }); }
+    })(window.__SECTIONS, 0);
+    var out = [];
+    if(CFG.images) out = out.concat(img);
+    if(CFG.audio === true || (CFG.audio === 'desktop' && !mobile && fastNet)) out = out.concat(aud);
+    if(CFG.video) out = out.concat(vid);
+    return out;
+  }
+
+  var queue = [], active = 0, started = false, done = false;
+  function panelOpen(){ var p=document.getElementById('panel'); return !!(p && p.classList.contains('on')); }
+  function blocked(){ return document.hidden || panelOpen(); }
+
+  function idle(fn){
+    if(window.requestIdleCallback) requestIdleCallback(fn, {timeout:1500});
+    else setTimeout(fn, 60);
+  }
+
+  function pump(){
+    if(done) return;
+    if(blocked()){ setTimeout(pump, 800); return; }                    // 面板开着 / 页面在后台：先歇着，别和用户正在看的图抢带宽
+    while(active < MAX_PAR && queue.length){
+      var url = queue.shift();
+      active++;
+      load(url).then(function(){ active--; setTimeout(function(){ idle(pump); }, GAP); });
+    }
+    if(!queue.length && !active){ done = true; }
+  }
+
+  function load(url){
+    var opt = {priority:'low', credentials:'same-origin'};
+    var ctl = ('AbortController' in window) ? new AbortController() : null;
+    if(ctl) opt.signal = ctl.signal;
+    var tm = setTimeout(function(){ try{ ctl && ctl.abort(); }catch(e){} }, 30000);   // 单个文件 30s 还没下完就放弃，别卡住整条队列
+    return fetch(url, opt).then(function(r){
+      if(!r.ok) return;
+      return r.arrayBuffer();                                           // 把响应读完，浏览器才会把它完整写进缓存；读完立刻丢弃，不留在内存里
+    }).catch(function(){}).then(function(){ clearTimeout(tm); });
+  }
+
+  function start(){
+    if(started) return; started = true;
+    queue = collect();
+    if(!queue.length) return;
+    pump();
+    // 面板关上后立刻接着跑
+    var pn = document.getElementById('panel');
+    if(pn && 'MutationObserver' in window){
+      new MutationObserver(function(){ if(!done && !panelOpen()) setTimeout(pump, 1200); }).observe(pn,{attributes:true,attributeFilter:['class']});
+    }
+    document.addEventListener('visibilitychange', function(){ if(!document.hidden && !done) setTimeout(pump, 600); });
+  }
+
+  // 等加载遮罩淡出并被移除（= 场景已经就绪、入场动画开始）后，再等一小会儿、等浏览器空闲
+  function waitIntro(){
+    if(document.getElementById('loader')){ setTimeout(waitIntro, 300); return; }
+    setTimeout(function(){ idle(start); }, CFG.startDelay);
+  }
+  if(document.readyState === 'complete') waitIntro();
+  else window.addEventListener('load', waitIntro, {once:true});
 })();
 </script>
 </body>
