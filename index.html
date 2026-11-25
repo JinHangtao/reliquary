@@ -395,9 +395,12 @@ body.panel-open #three { transform:translateX(-3.5vw); }
   #panel.burst:not(.on) .panel-bg { transition:opacity .88s cubic-bezier(.4,0,.2,1); }
 }
 
+/* 抽屉宽度唯一来源（电脑横屏）：想再宽/窄只改这一行；JS 里镜头取景的 _PANEL_W 要同步（搜索 _PANEL_W）。
+   旧值 clamp(520px,72vw,1100px) → 新值向左多扩一段 */
+:root{ --panel-w:clamp(560px,80vw,1360px); }
 .panel-inner {
   position:absolute; top:0; right:0; bottom:0;
-  width:clamp(520px,72vw,1100px);
+  width:var(--panel-w);
   overflow-y:auto;
   background:linear-gradient(175deg,rgba(18,17,15,.82) 0%,rgba(10,9,8,.88) 100%);
   /* [perf] 28px backdrop blur over the live WebGL canvas was re-computed every frame; panel is ~85% opaque so it was barely visible */
@@ -441,7 +444,7 @@ body.panel-open #three { transform:translateX(-3.5vw); }
    最右侧一块是纯色，保证抽屉主体（文字区）完全不透。 */
 #panelShade{
   position:absolute; top:0; bottom:0; right:0; pointer-events:none;
-  width:calc(clamp(520px,72vw,1100px) + 200px);
+  width:calc(var(--panel-w) + 200px);
   background:
     linear-gradient(to right, rgba(10,9,8,0.000) 0px, rgba(10,9,8,0.000) 40px, rgba(10,9,8,0.009) 68px, rgba(10,9,8,0.034) 96px, rgba(10,9,8,0.073) 124px, rgba(10,9,8,0.122) 151px, rgba(10,9,8,0.180) 179px, rgba(10,9,8,0.243) 207px, rgba(10,9,8,0.308) 235px, rgba(10,9,8,0.373) 263px, rgba(10,9,8,0.436) 291px, rgba(10,9,8,0.494) 319px, rgba(10,9,8,0.543) 346px, rgba(10,9,8,0.582) 374px, rgba(10,9,8,0.607) 402px, rgba(10,9,8,0.616) 430px, rgba(10,9,8,0.616) 4000px),
     linear-gradient(to right, rgba(10,9,8,0.000) 0px, rgba(10,9,8,0.000) 0px, rgba(10,9,8,0.004) 16px, rgba(10,9,8,0.015) 31px, rgba(10,9,8,0.031) 47px, rgba(10,9,8,0.052) 63px, rgba(10,9,8,0.077) 79px, rgba(10,9,8,0.104) 94px, rgba(10,9,8,0.132) 110px, rgba(10,9,8,0.160) 126px, rgba(10,9,8,0.187) 141px, rgba(10,9,8,0.212) 157px, rgba(10,9,8,0.233) 173px, rgba(10,9,8,0.249) 189px, rgba(10,9,8,0.260) 204px, rgba(10,9,8,0.264) 220px, rgba(10,9,8,0.264) 4000px);   /* 通透：一路缓缓铺过去，最深约 0.79，抽屉里还能隐约透出场景的光 */
@@ -1316,7 +1319,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
    并把渐变起点再向左外推 120px，使抽屉边缘落在渐变的中段，而不是起点附近。整体明暗与原来基本一致。 */
 @media (min-width:769px){
   #panelShade{
-    width:calc(clamp(520px,72vw,1100px) + 320px);
+    width:calc(var(--panel-w) + 320px);
     background:linear-gradient(to right, rgba(10,9,8,0.0000) 0px, rgba(10,9,8,0.0001) 12px, rgba(10,9,8,0.0004) 24px, rgba(10,9,8,0.0014) 36px, rgba(10,9,8,0.0033) 48px, rgba(10,9,8,0.0062) 60px, rgba(10,9,8,0.0103) 72px, rgba(10,9,8,0.0158) 84px, rgba(10,9,8,0.0229) 96px, rgba(10,9,8,0.0315) 108px, rgba(10,9,8,0.0417) 120px, rgba(10,9,8,0.0536) 132px, rgba(10,9,8,0.0671) 144px, rgba(10,9,8,0.0823) 156px, rgba(10,9,8,0.0991) 168px, rgba(10,9,8,0.1174) 180px, rgba(10,9,8,0.1372) 192px, rgba(10,9,8,0.1583) 204px, rgba(10,9,8,0.1806) 216px, rgba(10,9,8,0.2041) 228px, rgba(10,9,8,0.2286) 240px, rgba(10,9,8,0.2538) 252px, rgba(10,9,8,0.2798) 264px, rgba(10,9,8,0.3062) 276px, rgba(10,9,8,0.3330) 288px, rgba(10,9,8,0.3600) 300px, rgba(10,9,8,0.3870) 312px, rgba(10,9,8,0.4138) 324px, rgba(10,9,8,0.4402) 336px, rgba(10,9,8,0.4662) 348px, rgba(10,9,8,0.4914) 360px, rgba(10,9,8,0.5159) 372px, rgba(10,9,8,0.5394) 384px, rgba(10,9,8,0.5617) 396px, rgba(10,9,8,0.5828) 408px, rgba(10,9,8,0.6026) 420px, rgba(10,9,8,0.6209) 432px, rgba(10,9,8,0.6377) 444px, rgba(10,9,8,0.6529) 456px, rgba(10,9,8,0.6664) 468px, rgba(10,9,8,0.6783) 480px, rgba(10,9,8,0.6885) 492px, rgba(10,9,8,0.6971) 504px, rgba(10,9,8,0.7042) 516px, rgba(10,9,8,0.7097) 528px, rgba(10,9,8,0.7138) 540px, rgba(10,9,8,0.7167) 552px, rgba(10,9,8,0.7186) 564px, rgba(10,9,8,0.7196) 576px, rgba(10,9,8,0.7199) 588px, rgba(10,9,8,0.7200) 600px, rgba(10,9,8,0.7200) 600px, rgba(10,9,8,0.7200) 4000px);
   }
 }
@@ -8026,7 +8029,7 @@ resetIdleTimer();
         _ly -= _rt.y*_tnx*_halfW + _cu.y*_tny*_halfH;
         _lz -= _rt.z*_tnx*_halfW + _cu.z*_tny*_halfH;
       } else {
-        var _pw = Math.min(1100, Math.max(520, window.innerWidth*0.72));
+        var _pw = Math.min(1360, Math.max(560, window.innerWidth*0.80));   // _PANEL_W：与 CSS --panel-w 保持一致
         var _pf = Math.min(0.9, _pw / window.innerWidth);
         _lx += _rt.x * _halfW * 0.5 * _pf;
         _ly += _rt.y * _halfW * 0.5 * _pf;
