@@ -12907,6 +12907,7 @@ document.addEventListener('keydown', e => {
       oPos += oVel*h;
     }
     if(oPos<-OVER_MAX){ oPos=-OVER_MAX; if(oVel<0) oVel*=0.3; }   // 冲出上限，避免撞到屏幕顶边
+    if(oPos> OVER_MAX){ oPos= OVER_MAX; if(oVel>0) oVel*=0.3; }   // 反向（往下冲）同样的上限
     if(Math.abs(oPos)<0.03 && Math.abs(oVel)<1){ oPos=0; oVel=0; }
   }
   function tick(){
@@ -12919,6 +12920,8 @@ document.addEventListener('keydown', e => {
       vx += (inst-vx)*0.5;                                                    // 轻度平滑，防止单帧尖峰
       // 撞击：上一帧还没到顶，这一帧到顶了 → 把速度的一部分交给弹簧，× 带着惯性往上冲
       if(prevX>0 && x<=0 && vx<-40){ oVel += Math.max(-KICK_MAX, vx*KICK); }
+      // 离开：往下翻之后突然往上滑，标题行从停靠点放开 × → 把向下的速度同样交给弹簧，× 往下冲一点点、回弹、停稳（和上冲对称，前后都有惯性）
+      else if(prevX<=0 && x>0 && vx>40){ oVel += Math.min(KICK_MAX, vx*KICK); }
     }
     prevX=x; prevT=now;
     stepSpring(dt);
