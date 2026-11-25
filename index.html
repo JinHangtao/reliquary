@@ -4567,53 +4567,6 @@ window._sceneState = {
     if(slot.style.aspectRatio !== r) slot.style.aspectRatio = r;
     try{ localStorage.setItem('piR:' + key, r); }catch(_e){}
   }
-  // ── 只读图片文件头（PNG/JPEG/WebP 前几十KB）拿到真实宽高比 ──
-  // 目的：首次访问、还没缓存比例时，也能在图片下载完成之前就把卡片高度定成最终高度，加载完不再变高/变矮。
-  var _piProbing = {};
-  function _piParseDims(b){
-    var n = b.length, i;
-    if(n > 24 && b[0]===0x89 && b[1]===0x50 && b[2]===0x4E && b[3]===0x47)           // PNG: IHDR
-      return [(b[16]<<24|b[17]<<16|b[18]<<8|b[19])>>>0, (b[20]<<24|b[21]<<16|b[22]<<8|b[23])>>>0];
-    if(n > 30 && b[0]===0x52 && b[1]===0x49 && b[2]===0x46 && b[3]===0x46 && b[8]===0x57){  // WebP
-      var t = String.fromCharCode(b[12],b[13],b[14],b[15]);
-      if(t === 'VP8X') return [1+(b[24]|b[25]<<8|b[26]<<16), 1+(b[27]|b[28]<<8|b[29]<<16)];
-      if(t === 'VP8L') { var v = b[21]|b[22]<<8|b[23]<<16|b[24]<<24; return [1+(v&0x3FFF), 1+((v>>14)&0x3FFF)]; }
-      if(t === 'VP8 ') return [(b[26]|b[27]<<8)&0x3FFF, (b[28]|b[29]<<8)&0x3FFF];
-    }
-    if(n > 4 && b[0]===0xFF && b[1]===0xD8){                                           // JPEG: 找 SOF 段
-      i = 2;
-      while(i + 9 < n){
-        if(b[i] !== 0xFF){ i++; continue; }
-        var m = b[i+1];
-        if(m === 0xFF){ i++; continue; }
-        if(m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC)
-          return [b[i+7]<<8|b[i+8], b[i+5]<<8|b[i+6]];
-        i += 2 + (b[i+2]<<8|b[i+3]);
-      }
-    }
-    return null;
-  }
-  function _piProbeRatio(src, cb){
-    if(_piProbing[src]){ _piProbing[src].push(cb); return; }
-    _piProbing[src] = [cb];
-    var done = function(r){ var q = _piProbing[src] || []; _piProbing[src] = null; q.forEach(function(f){ try{ f(r); }catch(_e){} }); };
-    try{
-      var ac = window.AbortController ? new AbortController() : null;
-      fetch(src, { headers:{ Range:'bytes=0-65535' }, signal: ac ? ac.signal : undefined }).then(function(res){
-        if(!res.ok || !res.body || !res.body.getReader){ done(null); return; }
-        var rd = res.body.getReader(), buf = new Uint8Array(0);
-        (function pump(){
-          rd.read().then(function(o){
-            if(o.value){ var nb = new Uint8Array(buf.length + o.value.length); nb.set(buf); nb.set(o.value, buf.length); buf = nb; }
-            var d = buf.length ? _piParseDims(buf) : null;
-            if(d && d[0] > 0 && d[1] > 0){ if(ac) ac.abort(); done(d[0] + ' / ' + d[1]); return; }
-            if(o.done || buf.length > 262144){ if(ac) ac.abort(); done(null); return; }
-            pump();
-          }, function(){ done(null); });
-        })();
-      }, function(){ done(null); });
-    }catch(_e){ done(null); }
-  }
   function _bindProgressiveImages(root){
     root.querySelectorAll('img').forEach(function(img){
       if(img.dataset.pi) return;
@@ -4640,16 +4593,7 @@ window._sceneState = {
         // 先把槽位的高度定死（见上方 ratio 说明），图片只负责填满它
         var _kr = _piKnownRatio(img, _piKey);
         if(_kr){ slot.style.aspectRatio = _kr; }
-        else {
-          slot.classList.add('pi-guess', 'pi-grow');
-          var _pSrc = img.getAttribute('data-src') || img.getAttribute('src');
-          if(_pSrc) _piProbeRatio(_pSrc, function(r){
-            if(!r || slot.classList.contains('pi-ready')) return;
-            slot.classList.remove('pi-guess');
-            slot.style.aspectRatio = r;
-            try{ localStorage.setItem('piR:' + _piKey, r); }catch(_e){}
-          });
-        }
+        else { slot.classList.add('pi-guess', 'pi-grow'); }
         img.style.height = '100%';
         img.style.objectFit = 'cover';
       }
