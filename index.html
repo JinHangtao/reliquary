@@ -12857,30 +12857,47 @@ document.addEventListener('keydown', e => {
   var home=btn.parentNode, mq=window.matchMedia('(max-width:768px)');
   var restTop=0, stopAt=0, running=false;
   function measure(){ restTop=btn.offsetTop||0; }
-  // 三次 Hermite 软夹紧：x>=A 时 1:1 跟随内容；x 从 A 降到 -B 的过程中，速度平滑地从 1 降到 0，位置缓缓落到停靠点
-  var SA=22, SB=32;
-  function soft(x){
-    if(x>=SA) return x;
-    if(x<=-SB) return 0;
-    var L=SA+SB, t=(x+SB)/L, t2=t*t, t3=t2*t;
-    return (3*t2-2*t3)*SA + (t3-t2)*L;
+  // ── 惯性：× 被内容「顶」到停靠点时，把撞击瞬间的速度交给一根欠阻尼弹簧，
+  //    它会冲出去一点点、回弹、再停稳。平时滚动仍然 1:1 跟手，不会有延迟 / 拖尾。
+  var oPos=0, oVel=0, prevX=null, prevT=0, vx=0;
+  var SPRING_K=430, SPRING_C=21;      // 弹簧刚度 / 阻尼（阻尼比≈0.5：能回弹 1~2 下）
+  var KICK=0.62, KICK_MAX=520, OVER_MAX=15;   // 撞击传递比例 / 最大冲击速度 / 最大冲出距离(px)
+  function stepSpring(dt){
+    var n=2, h=dt/n;
+    for(var i=0;i<n;i++){
+      oVel += (-SPRING_K*oPos - SPRING_C*oVel)*h;
+      oPos += oVel*h;
+    }
+    if(oPos<-OVER_MAX){ oPos=-OVER_MAX; if(oVel<0) oVel*=0.3; }   // 冲出上限，避免撞到屏幕顶边
+    if(Math.abs(oPos)<0.03 && Math.abs(oVel)<1){ oPos=0; oVel=0; }
   }
   function tick(){
     if(!mq.matches){ running=false; return; }
+    var now=performance.now();
     var x=head.getBoundingClientRect().top + 20 - restTop;                    // 20 = 原 × 在标题行里的 top；x = 标题行离「停靠点」还有多远
-    var d=soft(x);                                                            // 软着陆：快到停靠点时先减速，再轻轻停住，而不是撞墙式急停
+    var dt=prevX===null ? 0.016 : Math.min(0.034, Math.max(0.004, (now-prevT)/1000));
+    if(prevX!==null){
+      var inst=(x-prevX)/dt;                                                  // 标题行（也就是 ×）此刻的速度，向上为负
+      vx += (inst-vx)*0.5;                                                    // 轻度平滑，防止单帧尖峰
+      // 撞击：上一帧还没到顶，这一帧到顶了 → 把速度的一部分交给弹簧，× 带着惯性往上冲
+      if(prevX>0 && x<=0 && vx<-40){ oVel += Math.max(-KICK_MAX, vx*KICK); }
+    }
+    prevX=x; prevT=now;
+    stepSpring(dt);
+    var d=Math.max(0,x);                                                      // 硬夹紧的「跟手」位置
     var D0=inner.offsetTop + head.offsetTop + 20 - restTop;                   // 抽屉停稳、未滚动时的距离
     var k=D0>1 ? Math.min(1, Math.max(0, 1 - d/D0)) : 1;
-    k=k*k*(3-2*k);                                                            // smoothstep：变淡 / 变小 / 旋转 都是「慢-快-慢」，起落更柔
-    btn.style.translate='0px '+d.toFixed(1)+'px';
+    k=k*k*(3-2*k);                                                            // smoothstep：变淡 / 变小 / 旋转 都是「慢-快-慢」
+    btn.style.translate='0px '+(d+oPos).toFixed(2)+'px';                      // 跟手位置 + 惯性位移
     btn.style.setProperty('--out', k.toFixed(3));
     if(panel.classList.contains('on') || Date.now()<stopAt) requestAnimationFrame(tick); else running=false;
   }
   function kick(){
     if(!mq.matches) return;
     measure();
+    if(panel.classList.contains('on')){ oPos=0; oVel=0; }
     if(!panel.classList.contains('on')) stopAt=Date.now()+900;                 // 收起时再跟 0.9s，× 随抽屉一起下去
-    if(!running){ running=true; requestAnimationFrame(tick); }
+    if(!running){ running=true; prevX=null; vx=0; requestAnimationFrame(tick); }
   }
   function place(){
     if(mq.matches){
