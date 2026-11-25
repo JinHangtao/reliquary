@@ -1212,6 +1212,11 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
   #panelBody .gx-grid{grid-template-columns:1fr;row-gap:14px}
   #panelBody .gx-card{grid-column:1/-1;margin-top:0;z-index:0}   /* [fix] iOS/手机 WebKit：overflow:hidden+圆角的卡片需要自己的层叠上下文，圆角裁剪/重绘才稳定 */
 }
+/* [fix] 灯箱 ⇄ 预览页衔接：右上角 × 按钮。
+   灯箱的飞行图在 × 之上，飞回落地的那一帧 × 会「突然」出现并盖在落地的卡片上。
+   现在灯箱打开 / 飞行期间 × 先淡出，等飞行图落地、交接完成后再柔和淡入。 */
+#panel .panel-head .panel-close{ transition:scale .22s cubic-bezier(.22,1,.36,1), border-color .3s, opacity .4s cubic-bezier(.32,.72,0,1) .06s; }
+#panel.lb-hide .panel-head .panel-close{ opacity:0; pointer-events:none; transition:scale .22s cubic-bezier(.22,1,.36,1), border-color .3s, opacity .12s ease; }
 </style>
 </head>
 <body>
@@ -12619,6 +12624,20 @@ document.addEventListener('keydown', e => {
   new MutationObserver(function(){ geoDirty=true; kick(); setTimeout(function(){ geoDirty=true; kick(); },900); }).observe(panel,{attributes:true,attributeFilter:['class']});
   setInterval(function(){ if(frozenGlobal()!==lastFrozen) kick(); },200);   // 灯箱关闭落地后，卡片缓缓恢复漂浮
   collect();
+})();
+</script>
+<script>
+/* [fix] 灯箱打开 / 飞行期间隐藏预览页右上角 ×，落地后再淡入（样式见 #panel.lb-hide） */
+(function(){
+  var lb=document.getElementById('lb'), panel=document.getElementById('panel');
+  if(!lb||!panel) return;
+  function sync(){
+    var hide=lb.classList.contains('on')||lb.classList.contains('lb-flying')||!!window._lbIsOn||!!window._lbFlying;
+    panel.classList.toggle('lb-hide',hide);
+  }
+  new MutationObserver(sync).observe(lb,{attributes:true,attributeFilter:['class']});
+  setInterval(sync,200);   // 兜底：_lbIsOn / _lbFlying 是变量，变化时不一定伴随 class 变化
+  sync();
 })();
 </script>
 </body>
