@@ -13071,5 +13071,51 @@ document.addEventListener('keydown', e => {
   else window.addEventListener('load', waitIntro, {once:true});
 })();
 </script>
+
+<script id="panel-wheel-global">
+/* ══ 电脑横屏：预览页打开时，鼠标在【整个屏幕】（含左半部分）都能用滚轮上下滚动抽屉 ══
+   · 抽屉自己的区域（.panel-inner）仍走浏览器原生滚动，这里不干预；
+   · 只接管抽屉之外的区域（左侧场景压暗层等）：把滚轮增量转给 #panelInner，带一点缓动，手感与右侧接近；
+   · 灯箱（大图）打开时不接管；Ctrl/⌘ + 滚轮（浏览器缩放）不接管；手机/竖屏窄屏不启用。 */
+(function(){
+  var panel = document.getElementById('panel');
+  var inner = document.getElementById('panelInner');
+  if(!panel || !inner) return;
+  var mq = window.matchMedia('(min-width:769px)');
+  var target = 0, raf = 0;
+
+  function lbBusy(){ return !!(window._lbIsOn || window._lbOpen || window._lbFlying); }
+
+  function step(){
+    var cur = inner.scrollTop, diff = target - cur;
+    if(Math.abs(diff) < 0.5){ inner.scrollTop = target; raf = 0; return; }
+    inner.scrollTop = cur + diff * 0.2;
+    raf = requestAnimationFrame(step);
+  }
+
+  panel.addEventListener('wheel', function(e){
+    if(!mq.matches) return;
+    if(!panel.classList.contains('on')) return;       // 抽屉没打开：让场景自己的滚轮（拉近/拉远）接管
+    if(lbBusy()) return;                              // 灯箱打开：不干预
+    if(e.ctrlKey || e.metaKey) return;                // 浏览器缩放手势
+    if(inner.contains(e.target)) return;              // 抽屉内部：原生滚动
+    if(Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;  // 只转发纵向滚动
+
+    e.preventDefault();
+    var dy = e.deltaY;
+    if(e.deltaMode === 1) dy *= 16;                   // 行 → 像素
+    else if(e.deltaMode === 2) dy *= inner.clientHeight;  // 页 → 像素
+
+    var max = inner.scrollHeight - inner.clientHeight;
+    if(!raf) target = inner.scrollTop;                // 静止时以当前位置为起点（右侧原生滚动后也不会跳）
+    target = Math.max(0, Math.min(max, target + dy));
+    if(!raf) raf = requestAnimationFrame(step);
+  }, {passive:false});
+
+  // 用户用键盘 / 拖动右侧滚动条等其它方式改了位置时，放弃未完成的缓动，避免"拉回去"
+  inner.addEventListener('wheel', function(){ if(raf){ cancelAnimationFrame(raf); raf = 0; } }, {passive:true});
+  inner.addEventListener('touchstart', function(){ if(raf){ cancelAnimationFrame(raf); raf = 0; } }, {passive:true});
+})();
+</script>
 </body>
 </html>
