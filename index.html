@@ -8874,6 +8874,16 @@ function _lbFlyState(on){
   (window._dbg&&window._dbg('flyState('+(!!on)+')'));
   window._lbFlying = !!on;
   var e = document.getElementById('lb'); if(e) e.classList.toggle('lb-flying', !!on);
+  /* [fix 手机落地闪] 以前 _lbFlying 复位的同一帧，Three.js 整屏渲染 + 背景 + 全部卡片漂浮动画一起恢复，
+     手机 GPU/主线程吃不消 → 整屏黑一下。现在卡片漂浮晚 700ms 再恢复（_lbCardHold），把「重活」错开。 */
+  if(on){ window._lbCardHold = true; clearTimeout(window._lbCardHoldTmr); }
+  else if(window._lbCardHold){
+    clearTimeout(window._lbCardHoldTmr);
+    window._lbCardHoldTmr = setTimeout(function(){
+      if(window._lbIsOn || window._lbFlying || window._DBG_NOCARDS) return;
+      window._lbCardHold = false;
+    }, window.innerWidth <= 768 ? 700 : 0);
+  }
 }    // 飞回的起点 transform（灯箱里放大 / 平移过时 = 当时的内联 transform，否则空）
 var _LB_EASE = 'cubic-bezier(.32,.72,0,1)';
 
@@ -12454,7 +12464,7 @@ document.addEventListener('keydown', e => {
     }
   }
   function kick(){ if(!raf) raf=requestAnimationFrame(tick); }
-  function frozenGlobal(){ return !!(window._lbIsOn||window._lbFlying); }
+  function frozenGlobal(){ return !!(window._lbIsOn||window._lbFlying||window._lbCardHold); }
   // 时间常数平滑（与帧率无关）
   function ease(cur,target,tau,dt){ return cur+(target-cur)*(1-Math.exp(-dt/tau)); }
   var lastT=0, holdUntil=0, lastCur=null;
@@ -12622,6 +12632,7 @@ document.addEventListener('keydown', e => {
   tog('①关快速动画','_LB_FAST',true);
   tog('②不卸灯箱','_DBG_NOHIDE');
   tog('③不恢复Three','_DBG_NORESUME');
+  tog('④卡片不恢复','_DBG_NOCARDS');
   var hid=false;
   btn('复制',function(b){ var txt=lines.join('\n'); try{ navigator.clipboard.writeText(txt).then(function(){b.textContent='已复制';setTimeout(function(){b.textContent='复制';},900);}); }catch(e){ b.textContent='无法复制'; } });
   btn('隐藏',function(b){ hid=!hid; box.style.display=hid?'none':''; b.textContent=hid?'显示':'隐藏'; });
