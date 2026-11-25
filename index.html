@@ -12521,9 +12521,25 @@ document.addEventListener('keydown', e => {
   var lastPtr='mouse', settleEl=null, openPending=false;   // 触屏：按下不回正；点按打开时才用一小段柔和过渡回正
   var STATIC_F='brightness(1) saturate(.8) contrast(1.05)';
   function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+  /* [patch] 防止预览卡片「往下扩」
+     原因：图片加载完成后，fitRatio 会把卡片比例改成图片真实比例；竖图落在 16:9 占位里就会把卡片撑高，
+          后面的卡片整体被顶下去（加载/待机重试/懒加载时都可能触发）。
+     现在：① 每张卡片只允许改一次比例，之后锁死；② 'noGrow' 模式下卡片高度永远不会超过初始占位（竖图改为裁切显示）。
+     GX_RATIO_MODE：'noGrow'（默认，只会变矮不会变高） | 'fixed'（完全不改，占位多大就多大） | 'real'（旧行为，按真实比例） */
+  var GX_RATIO_MODE='noGrow';
   function fitRatio(card){
+    if(card.getAttribute('data-gx-ratio')) return;               // 已锁定：绝不再改
     var im=card.querySelector('img');
-    if(im && im.naturalWidth) card.style.aspectRatio=im.naturalWidth+'/'+im.naturalHeight;
+    if(!im || !im.naturalWidth || !im.naturalHeight) return;
+    card.setAttribute('data-gx-ratio','1');
+    if(GX_RATIO_MODE==='fixed') return;
+    var nat=im.naturalWidth/im.naturalHeight;
+    if(GX_RATIO_MODE==='noGrow'){
+      var init=0, ar=(getComputedStyle(card).aspectRatio||'').split('/');
+      if(ar.length===2) init=parseFloat(ar[0])/parseFloat(ar[1]); else init=parseFloat(ar[0]);
+      if(init>0 && nat<init) nat=init;                           // 图比占位更「竖」→ 保持占位比例，不增高
+    }
+    card.style.aspectRatio=nat.toFixed(4);
   }
   function collect(){
     cards=[].slice.call(body.querySelectorAll('.gx-card')).map(function(el,i){
