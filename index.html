@@ -9013,7 +9013,12 @@ var _lbWinCache = null, _lbBoxCache = null;   // 飞行期间缓存：窗口/外
 function _lbCalcWindow(){
   var m  = document.getElementById('panelInner').getBoundingClientRect();
   var tb = document.querySelector('.panel-head').getBoundingClientRect();
-  var top = Math.max(m.top, tb.bottom, 0);
+  // [fix 手机金线] 窗口上沿必须从抽屉【边框内侧】开始：手机抽屉有 border-top:1px，m.top 是含边框的外缘，
+  // 卡片被抽屉顶边遮住一半时，飞行图会盖到这 1px 边框上（再叠加设备像素取整 ≈ 2px 的亮线），
+  // 落地交给缩略图的瞬间这条线又消失 → 抽屉最上沿「突然冒出一道金线」。
+  var _pi = document.getElementById('panelInner');
+  var _bt = (_pi && _pi.clientTop) || 0;                       // 抽屉上边框厚度（桌面端为 0，不受影响）
+  var top = Math.max(m.top + _bt, tb.bottom, 0);
   var bottom = Math.min(m.bottom, window.innerHeight);
   var fd = document.getElementById('panelScrollFade');
   if(fd){
