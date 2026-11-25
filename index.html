@@ -1252,6 +1252,35 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
   #panel .panel-body{ padding-right:max(54px, calc(env(safe-area-inset-right,0px) + 52px)); }
 }
 </style>
+<style id="close-outside-css">
+/* ══ [mobile] × 移到抽屉外面：贴在抽屉上方的空白条里，不再和卡片 / 飞入飞回产生任何交集 ══
+   手机端抽屉是底部弹层。把弹层高度收一点，让顶部固定留出「安全区 + 56px」的空条，× 就站在这条里。
+   (按钮本身由页面末尾的脚本在 ≤768px 时搬到 #panel 下，>768px 搬回原位，桌面 / 平板完全不受影响) */
+@media (max-width:768px){
+  .panel-inner{ height:min(91dvh, calc(100dvh - env(safe-area-inset-top,0px) - 56px)); }
+  #panel > .panel-close{
+    position:absolute; z-index:10; margin:0 !important; padding:0;
+    top:calc(env(safe-area-inset-top,0px) + 10px); right:14px;
+    width:36px; height:36px; border-radius:50%;
+    transform:none !important;                       /* 不再随滚动缩放 / 位移 */
+    border:1px solid rgba(255,255,255,.16);
+    background:rgba(10,9,8,.62);
+    -webkit-backdrop-filter:none; backdrop-filter:none;
+    box-shadow:0 4px 16px rgba(0,0,0,.35);
+    opacity:0; pointer-events:none;                  /* 抽屉没打开时不显示 */
+    transition:opacity .2s ease, scale .22s cubic-bezier(.22,1,.36,1), border-color .3s;
+    -webkit-tap-highlight-color:transparent;
+  }
+  #panel.on > .panel-close{ opacity:1; pointer-events:auto; transition:opacity .35s ease .3s, scale .22s cubic-bezier(.22,1,.36,1), border-color .3s; }   /* 抽屉升起后再淡入 */
+  #panel > .panel-close:active{ scale:.9; }
+  #panel > .panel-close::before{ display:none; }     /* 不需要「压卡片时垫玻璃」 */
+  #panel > .panel-close .cl-ghost{ stroke:rgba(245,241,232,.78); opacity:1; }
+  #panel > .panel-close .cl-line{ stroke:rgba(245,241,232,.95); }
+  /* 灯箱打开期间淡出，飞回落地后再回来（沿用原来的 lb-hide / lb-return 状态） */
+  #panel.on.lb-hide > .panel-close{ opacity:0; pointer-events:none; transition:opacity .1s linear; }
+  #panel.on.lb-return > .panel-close{ animation:closeReturn .55s cubic-bezier(.22,1,.36,1) .3s both; }
+}
+</style>
 </head>
 <body>
 
@@ -12730,6 +12759,21 @@ document.addEventListener('keydown', e => {
   window.addEventListener('orientationchange',function(){ setTimeout(schedule,350); });
   setInterval(function(){ sync(); schedule(); },250);   // 兜底：_lbFlying / _lbCardHold 是变量，变化时不一定伴随 class 变化
   sync();
+})();
+</script>
+<script>
+/* [mobile] × 搬家：≤768px 放到 #panel 下（抽屉外面），否则回到 .panel-head 里 */
+(function(){
+  var btn=document.getElementById('panelClose'), panel=document.getElementById('panel');
+  if(!btn||!panel) return;
+  var home=btn.parentNode;
+  var mq=window.matchMedia('(max-width:768px)');
+  function place(){
+    if(mq.matches){ if(btn.parentNode!==panel) panel.appendChild(btn); }
+    else if(home && btn.parentNode!==home){ home.appendChild(btn); }
+  }
+  place();
+  if(mq.addEventListener) mq.addEventListener('change',place); else if(mq.addListener) mq.addListener(place);
 })();
 </script>
 </body>
