@@ -1197,8 +1197,7 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
    · 电脑 / 横屏：去掉 8 层 backdrop-filter 磨砂（它们要对下面实时 WebGL 画布逐帧重采样，最耗性能），只保留 ::after 那层同色暗雾，观感基本不变；
    · 手机竖屏：整条黑幕删除（抽屉本身是整宽实底，关闭键自带玻璃质感，不需要再压一条暗带）。
    想恢复原样：删掉下面这一段即可。 */
-#panel .panel-topblur .tb i{ display:none !important; }
-@media (max-width:768px){ #panel .panel-topblur{ display:none !important; } }
+#panel .panel-topblur{ display:none !important; }   /* 电脑 / 横屏 / 手机：顶部黑幕与磨砂一律不显示 */
 </style>
 
 <style id="gx-css">
@@ -1212,6 +1211,45 @@ img.pi.pi-done{will-change:auto;filter:var(--pi-f);transition:none!important;}
 @media (max-width:768px){
   #panelBody .gx-grid{grid-template-columns:1fr;row-gap:14px}
   #panelBody .gx-card{grid-column:1/-1;margin-top:0;z-index:0}   /* [fix] iOS/手机 WebKit：overflow:hidden+圆角的卡片需要自己的层叠上下文，圆角裁剪/重绘才稳定 */
+}
+/* [fix v2] 灯箱 ⇄ 预览页衔接的 × 按钮样式见页面末尾 #close-fix-css */
+</style>
+<style id="close-fix-css">
+/* ══ 预览页右上角 × 与灯箱的衔接（电脑 / 手机竖屏 / 横屏）══
+   1) 灯箱打开 → 立即淡出 ×；飞回 + 落地交接 + 卡片恢复漂浮全部结束，再多等一小会儿，才用「淡入 + 轻微放大」回来
+   2) × 压在卡片上时，底下垫一层深色玻璃（.over-card），不再和图片糊在一起
+   3) 电脑端右侧留出 × 的专用通道，靠右的卡片不会再顶到 ×
+   4) 横屏：缩小 ×、贴合刘海 / 圆角安全区 */
+#panel .panel-head .panel-close{
+  transition:scale .22s cubic-bezier(.22,1,.36,1), border-color .3s, opacity .3s ease;
+}
+#panel .panel-head .panel-close::before{
+  content:''; position:absolute; inset:-1px; border-radius:inherit; z-index:-1; pointer-events:none;
+  background:rgba(10,9,8,.58); opacity:0; transition:opacity .35s cubic-bezier(.32,.72,0,1);
+}
+#panel .panel-head .panel-close.over-card::before{ opacity:1; }
+#panel.lb-hide .panel-head .panel-close{
+  opacity:0; pointer-events:none; transition:opacity .1s linear;
+}
+#panel.lb-return .panel-head .panel-close{ animation:closeReturn .55s cubic-bezier(.22,1,.36,1) both; }
+@keyframes closeReturn{ from{ opacity:0; scale:.8; } to{ opacity:1; scale:1; } }
+@media (prefers-reduced-motion:reduce){ #panel.lb-return .panel-head .panel-close{ animation:none; } }
+
+/* 电脑：× 占 12~46px，卡片right边距加到 54px，中间留 8px 通道 */
+@media (min-width:769px){
+  #panel .panel-hero{ padding-right:54px; }
+  #panel .panel-body{ padding-right:54px; }
+  #panel .panel-head .panel-close{ right:12px; }
+}
+/* 横屏（手机 / 小平板横着拿）：高度很小，× 缩小上移，并避开刘海 / 圆角 */
+@media (orientation:landscape) and (max-height:520px){
+  #panel .panel-head{ margin-top:22px; }
+  #panel .panel-head .panel-close{
+    width:32px; height:32px; top:10px;
+    right:max(12px, calc(env(safe-area-inset-right,0px) + 8px));
+  }
+  #panel .panel-hero{ padding-right:max(54px, calc(env(safe-area-inset-right,0px) + 52px)); }
+  #panel .panel-body{ padding-right:max(54px, calc(env(safe-area-inset-right,0px) + 52px)); }
 }
 </style>
 </head>
@@ -12620,6 +12658,69 @@ document.addEventListener('keydown', e => {
   new MutationObserver(function(){ geoDirty=true; kick(); setTimeout(function(){ geoDirty=true; kick(); },900); }).observe(panel,{attributes:true,attributeFilter:['class']});
   setInterval(function(){ if(frozenGlobal()!==lastFrozen) kick(); },200);   // 灯箱关闭落地后，卡片缓缓恢复漂浮
   collect();
+})();
+</script>
+
+<script>
+/* [fix v2] 预览页 × ⇄ 灯箱衔接：事件驱动 + 落地后延迟淡入 + 压卡片时自动垫底 */
+(function(){
+  var lb=document.getElementById('lb'), panel=document.getElementById('panel'), btn=document.getElementById('panelClose');
+  if(!lb||!panel||!btn) return;
+  var inner=panel.querySelector('.panel-inner')||panel;
+  var holdTmr=0, retTmr=0, rafId=0;
+  // 只有状态真的变了才改 class：classList.add/remove 即使没变化也会写属性并触发 MutationObserver，会造成死循环
+  function setCls(el,name,on){ if(el.classList.contains(name)!==on){ if(on) el.classList.add(name); else el.classList.remove(name); } }
+  function busy(){
+    return lb.classList.contains('on')||lb.classList.contains('lb-flying')||
+           !!window._lbIsOn||!!window._lbFlying||!!window._lbCardHold;
+  }
+  function checkOver(){
+    rafId=0;
+    if(!panel.classList.contains('on')){ setCls(btn,'over-card',false); return; }
+    var r=btn.getBoundingClientRect(), hit=false;
+    if(r.width){
+      var cards=panel.querySelectorAll('#panelBody .gx-card, .panel-body img');
+      for(var i=0;i<cards.length;i++){
+        var c=cards[i].getBoundingClientRect();
+        if(c.width&&c.right>r.left-4&&c.left<r.right+4&&c.bottom>r.top-4&&c.top<r.bottom+4){ hit=true; break; }
+      }
+    }
+    setCls(btn,'over-card',hit);
+  }
+  function schedule(){ if(!rafId) rafId=requestAnimationFrame(checkOver); }
+  function sync(){
+    if(busy()){
+      clearTimeout(holdTmr); holdTmr=0; clearTimeout(retTmr);
+      setCls(panel,'lb-return',false);
+      setCls(panel,'lb-hide',true);
+      return;
+    }
+    if(!panel.classList.contains('lb-hide')||holdTmr) return;
+    // 手机端飞回后卡片还有 700ms 的「恢复漂浮」缓冲，再多留一点，× 一定在卡片完全静止之后才回来
+    holdTmr=setTimeout(function(){
+      holdTmr=0;
+      if(busy()) return;
+      checkOver();
+      setCls(panel,'lb-return',true);
+      setCls(panel,'lb-hide',false);
+      retTmr=setTimeout(function(){ setCls(panel,'lb-return',false); },650);
+    }, window.innerWidth<=768 ? 320 : 380);
+  }
+  new MutationObserver(sync).observe(lb,{attributes:true,attributeFilter:['class']});
+  // 面板开关时：只做一次性清理 + 重新检测，回调里绝不无条件改 panel 的 class（否则自己触发自己 → 页面卡死）
+  var _wasOn=panel.classList.contains('on');
+  new MutationObserver(function(){
+    var on=panel.classList.contains('on');
+    if(on===_wasOn) return;
+    _wasOn=on;
+    if(!on){ clearTimeout(holdTmr); holdTmr=0; clearTimeout(retTmr); setCls(panel,'lb-hide',false); setCls(panel,'lb-return',false); setCls(btn,'over-card',false); }
+    schedule();
+  }).observe(panel,{attributes:true,attributeFilter:['class']});
+  inner.addEventListener('scroll',schedule,{passive:true});
+  window.addEventListener('resize',schedule,{passive:true});
+  window.addEventListener('orientationchange',function(){ setTimeout(schedule,350); });
+  setInterval(function(){ sync(); schedule(); },250);   // 兜底：_lbFlying / _lbCardHold 是变量，变化时不一定伴随 class 变化
+  sync();
 })();
 </script>
 </body>
