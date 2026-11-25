@@ -12668,13 +12668,15 @@ document.addEventListener('keydown', e => {
   if(!lb||!panel||!btn) return;
   var inner=panel.querySelector('.panel-inner')||panel;
   var holdTmr=0, retTmr=0, rafId=0;
+  // 只有状态真的变了才改 class：classList.add/remove 即使没变化也会写属性并触发 MutationObserver，会造成死循环
+  function setCls(el,name,on){ if(el.classList.contains(name)!==on){ if(on) el.classList.add(name); else el.classList.remove(name); } }
   function busy(){
     return lb.classList.contains('on')||lb.classList.contains('lb-flying')||
            !!window._lbIsOn||!!window._lbFlying||!!window._lbCardHold;
   }
   function checkOver(){
     rafId=0;
-    if(!panel.classList.contains('on')){ btn.classList.remove('over-card'); return; }
+    if(!panel.classList.contains('on')){ setCls(btn,'over-card',false); return; }
     var r=btn.getBoundingClientRect(), hit=false;
     if(r.width){
       var cards=panel.querySelectorAll('#panelBody .gx-card, .panel-body img');
@@ -12683,14 +12685,14 @@ document.addEventListener('keydown', e => {
         if(c.width&&c.right>r.left-4&&c.left<r.right+4&&c.bottom>r.top-4&&c.top<r.bottom+4){ hit=true; break; }
       }
     }
-    btn.classList.toggle('over-card',hit);
+    setCls(btn,'over-card',hit);
   }
   function schedule(){ if(!rafId) rafId=requestAnimationFrame(checkOver); }
   function sync(){
     if(busy()){
       clearTimeout(holdTmr); holdTmr=0; clearTimeout(retTmr);
-      panel.classList.remove('lb-return');
-      panel.classList.add('lb-hide');
+      setCls(panel,'lb-return',false);
+      setCls(panel,'lb-hide',true);
       return;
     }
     if(!panel.classList.contains('lb-hide')||holdTmr) return;
@@ -12699,14 +12701,21 @@ document.addEventListener('keydown', e => {
       holdTmr=0;
       if(busy()) return;
       checkOver();
-      panel.classList.add('lb-return');
-      panel.classList.remove('lb-hide');
-      retTmr=setTimeout(function(){ panel.classList.remove('lb-return'); },650);
+      setCls(panel,'lb-return',true);
+      setCls(panel,'lb-hide',false);
+      retTmr=setTimeout(function(){ setCls(panel,'lb-return',false); },650);
     }, window.innerWidth<=768 ? 320 : 380);
   }
   new MutationObserver(sync).observe(lb,{attributes:true,attributeFilter:['class']});
-  new MutationObserver(function(){ if(!panel.classList.contains('on')){ panel.classList.remove('lb-hide','lb-return'); } schedule(); })
-    .observe(panel,{attributes:true,attributeFilter:['class']});
+  // 面板开关时：只做一次性清理 + 重新检测，回调里绝不无条件改 panel 的 class（否则自己触发自己 → 页面卡死）
+  var _wasOn=panel.classList.contains('on');
+  new MutationObserver(function(){
+    var on=panel.classList.contains('on');
+    if(on===_wasOn) return;
+    _wasOn=on;
+    if(!on){ clearTimeout(holdTmr); holdTmr=0; clearTimeout(retTmr); setCls(panel,'lb-hide',false); setCls(panel,'lb-return',false); setCls(btn,'over-card',false); }
+    schedule();
+  }).observe(panel,{attributes:true,attributeFilter:['class']});
   inner.addEventListener('scroll',schedule,{passive:true});
   window.addEventListener('resize',schedule,{passive:true});
   window.addEventListener('orientationchange',function(){ setTimeout(schedule,350); });
