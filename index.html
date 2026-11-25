@@ -8031,9 +8031,10 @@ resetIdleTimer();
       } else {
         var _pw = Math.min(1240, Math.max(540, window.innerWidth*0.76));   // _PANEL_W：与 CSS --panel-w 保持一致
         var _pf = Math.min(0.9, _pw / window.innerWidth);
-        _lx += _rt.x * _halfW * 0.5 * _pf;
-        _ly += _rt.y * _halfW * 0.5 * _pf;
-        _lz += _rt.z * _halfW * 0.5 * _pf;
+        var _shiftK = 0.72;   // 晶体左移系数：原 0.5 → 0.72，让点击的晶体落在左侧空地里，不被抽屉第一张图片压住
+        _lx += _rt.x * _halfW * _shiftK * _pf;
+        _ly += _rt.y * _halfW * _shiftK * _pf;
+        _lz += _rt.z * _halfW * _shiftK * _pf;
       }
       var _blx = _viewTargetX, _bly = _viewTargetY;
       camera.up.set(_viewUpX + (0-_viewUpX)*focusE, _viewUpY + (1-_viewUpY)*focusE, _viewUpZ + (0-_viewUpZ)*focusE).normalize();
