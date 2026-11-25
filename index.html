@@ -396,8 +396,8 @@ body.panel-open #three { transform:translateX(-3.5vw); }
 }
 
 /* 抽屉宽度唯一来源（电脑横屏）：想再宽/窄只改这一行；JS 里镜头取景的 _PANEL_W 要同步（搜索 _PANEL_W）。
-   旧值 clamp(520px,72vw,1100px) → 新值向左多扩一段 */
-:root{ --panel-w:clamp(560px,80vw,1360px); }
+   原值 clamp(520px,72vw,1100px)；现值略扩一点，同时给左侧的可点击晶体留足空间 */
+:root{ --panel-w:clamp(540px,76vw,1240px); }
 .panel-inner {
   position:absolute; top:0; right:0; bottom:0;
   width:var(--panel-w);
@@ -8029,7 +8029,7 @@ resetIdleTimer();
         _ly -= _rt.y*_tnx*_halfW + _cu.y*_tny*_halfH;
         _lz -= _rt.z*_tnx*_halfW + _cu.z*_tny*_halfH;
       } else {
-        var _pw = Math.min(1360, Math.max(560, window.innerWidth*0.80));   // _PANEL_W：与 CSS --panel-w 保持一致
+        var _pw = Math.min(1240, Math.max(540, window.innerWidth*0.76));   // _PANEL_W：与 CSS --panel-w 保持一致
         var _pf = Math.min(0.9, _pw / window.innerWidth);
         _lx += _rt.x * _halfW * 0.5 * _pf;
         _ly += _rt.y * _halfW * 0.5 * _pf;
