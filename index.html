@@ -1572,8 +1572,10 @@ window._sceneState = {
   var ctx=c.getContext('2d');
   var W,H;
   function resize(){
-    W=c.width=window.innerWidth;
-    H=c.height=window.innerHeight;
+    var _iw=window.innerWidth, _ih=window.innerHeight;
+    W=_iw; H=_ih;
+    if(c.width!==_iw) c.width=_iw;      // [fix] 赋同值也会清空画布
+    if(c.height!==_ih) c.height=_ih;
     // Sync offscreen star canvas to new dimensions so drawImage fills the
     // full viewport without blank strips (bug: old canvas stayed at init size).
     // Guard: _starOffscreen is created later in this IIFE — only call rebuild
@@ -7528,7 +7530,12 @@ resetIdleTimer();
     // FXAA needs full-res scene size for texel offset calculation
     _matComposite.uniforms.uSceneSize.value.set(_bloomW, _bloomH);
   }
-  window.addEventListener('resize', _applyFboSize);
+  var _fboLW = window.innerWidth, _fboLH = window.innerHeight;
+  window.addEventListener('resize', function(){
+    if(window.innerWidth === _fboLW && window.innerHeight === _fboLH) return;   // [fix] 尺寸没变不重建 FBO
+    _fboLW = window.innerWidth; _fboLH = window.innerHeight;
+    _applyFboSize();
+  });
   // 运行时降档：改 _prScale 后同步 renderer + 全部 FBO（只在帧开头调用，不会闪黑帧）
   window._applyPxRatio = function(){
     renderer.setPixelRatio(_pxRatio());
@@ -7719,7 +7726,12 @@ resetIdleTimer();
 
   function animate(){
     requestAnimationFrame(animate);
-    if(window._lbOpen || window._lbFlying){ clock.getDelta(); return; }
+    if(window._lbOpen || window._lbFlying){
+      // [fix 手机黑屏] 灯箱期间若发生过 resize（手机地址栏/工具栏收放会触发），#bg / #three / #constellation 的画布已被清空，
+      // 而暂停的主循环不会重画 → 飞回落地时露出黑底，直到 _lbFlying 复位才恢复。有脏标记就补画这一帧。
+      if(!window._lbResizeDirty){ clock.getDelta(); return; }
+      window._lbResizeDirty = false;
+    }
     _governor();   // 灯箱完全打开后场景被遮住：不渲染（保持 clock 同步，恢复时无时间跳变）
     // getDelta() returns time since last call; cap at 80ms so a long hidden period
     // (screen lock, tab switch) only advances t by at most ~5 frames — no phase jump.
@@ -8795,6 +8807,7 @@ if(idleDriftSpeed > 0.000005){
     setTimeout(_scheduleLens, 5500);
   }
   window.addEventListener('resize',function(){
+    if(W===window.innerWidth && H===window.innerHeight) return;   // [fix] 尺寸没变就别重建画布（会清黑屏）
     W=window.innerWidth; H=window.innerHeight;
     CANVAS_OVERHANG = Math.round(W * 0.08);
     CW = W + CANVAS_OVERHANG;
@@ -8822,6 +8835,10 @@ if(idleDriftSpeed > 0.000005){
 </script>
 
 <script>
+// [fix 手机黑屏] 灯箱打开 / 飞行期间发生 resize → 标记「画布被清空，需要补画」，由 animate() 消费
+window.addEventListener('resize', function(){
+  if(window._lbOpen || window._lbFlying || window._lbIsOn) window._lbResizeDirty = true;
+}, {passive:true});
 // ══ LIGHTBOX ══
 // curLbIdx is always kept as a STRING to match the values returned by
 // getAttribute('data-lbidx') (Array.indexOf uses strict equality).
