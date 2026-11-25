@@ -936,6 +936,7 @@ body::after {
     will-change:opacity;
     transition:opacity .45s cubic-bezier(.4,0,.2,1);
   }
+  .lb:not(.on) .lb-side{ -webkit-backdrop-filter:none!important; backdrop-filter:none!important; }
   .lb.on .lb-bg{ opacity:1; }
   .lb:not(.on) .lb-bg{ transition:opacity .2s cubic-bezier(.4,0,.2,1); }
 
@@ -9565,7 +9566,7 @@ function _lbFlyOut(){
   var t   = _lbThumbOf(curLbIdx);
   /* 手机端：缩略图在灯箱期间一直 visibility:hidden，浏览器会丢掉它的解码数据；落地时才重新解码，
      来不及的话飞行图一撤就露出卡片黑底 = 「整张卡片变黑一下」。飞回一开始就预解码，飞行 300ms 足够完成。 */
-  window._lbThDec = null;
+  window._lbThDec = null; window._lbLandAt = 0;
   if(window.innerWidth <= 768 && t && t.decode){
     try{ window._lbThDec = t.decode().catch(function(){}); }catch(e){ window._lbThDec = null; }
   }
@@ -9633,11 +9634,12 @@ function _lbFlyOut(){
             /* 手机端：飞行图撤掉的这一帧，不能同时有别的事发生。_lbFlyState(false) 会同时让 ① Three.js 恢复整屏渲染（首帧很重）
                ② 卡片漂浮系统解冻 ③ 面板各类定时任务恢复 —— 主线程一卡，合成器就可能在「缩略图尚未稳定栅格化」时出一帧，
                表现为整张卡片闪一下。所以手机端把这些全部延后到落地稳定之后（期间 _lbFlying 仍为 true，卡片保持回正静止）。 */
+            window._lbLandAt = Date.now();    // 供 _cleanFn：落地稳定后先单独卸掉灯箱层，再（更晚）恢复 Three / 卡片漂浮
             setTimeout(function(){
               if(_lbIsOn || _lbAnim || _lbTail) return;   // 期间又开/关了灯箱：交给新的流程自己管理
               _lbFlyState(false);
               requestAnimationFrame(function(){ if(!_lbIsOn) _lbReleaseCap(); });
-            }, 320);
+            }, 560);
           } else {
             _lbFlyState(false);
             requestAnimationFrame(function(){ if(!_lbIsOn) _lbReleaseCap(); });   // 飞行图撤掉后的下一帧再放开小介绍，避免与缩略图显现同帧「弹出」
@@ -9977,7 +9979,9 @@ function closeLb(){
     if(_lbIsOn) return;             // 期间又打开了，绝不能把新图清掉
     // 飞回 = 预热(等解码,最长~190ms) + 飞行300ms + 落地交接。_resetDelay 是固定值，预热偏长时会先于飞回结束触发，
     // 清理会在半空/交接中途删掉飞行层并还原缩略图 → 偶发闪烁。所以必须等飞行与交接真正结束再清（最多等 2.5s 兜底）。
-    if((window._lbFlying || _lbTail) && Date.now() - _cleanT0 < 2500){
+    var _nar = window.innerWidth <= 768;
+    var _landed = _nar && window._lbLandAt && Date.now() - window._lbLandAt > 180;   // 手机端：落地稳定 180ms 后即可卸灯箱层，不必等 _lbFlying 复位
+    if(((window._lbFlying && !_landed) || _lbTail) && Date.now() - _cleanT0 < 2500){
       _lbCloseTmr = setTimeout(_cleanFn, 40);
       return;
     }
@@ -9987,7 +9991,9 @@ function closeLb(){
     var imgBox = document.getElementById('lbImgBox');
     var colEl  = document.querySelector('.lb-col');
     var wrapEl = document.querySelector('.lb-wrap');
-    _lbCancelAnim();
+    var _keepFly = _landed && window._lbFlying;
+    _lbCancelAnim();                                  // 内部会 _lbFlyState(false)：手机端必须保持 true，交给落地定时器在更晚的时刻恢复
+    if(_keepFly) window._lbFlying = true;
     _lbRestoreThumb();
     if(window._lbResetZoom) window._lbResetZoom(true);
     img.classList.remove('lb-fadein');
