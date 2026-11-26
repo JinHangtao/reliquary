@@ -4852,12 +4852,13 @@ window._sceneState = {
     _swBusy = true;
     setCamFocus(cr);
     var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion:reduce)').matches;
-    var D_OUT = reduce ? 0 : 170, D_IN = reduce ? 0 : 440;
+    var D_OUT = reduce ? 0 : (isMobile ? 140 : 170), D_IN = reduce ? 0 : (isMobile ? 360 : 440);
+    if(isTouchDev && navigator.vibrate) navigator.vibrate(10);   // 与点石头的触感一致，但更轻
     var els = [panelEl.querySelector('.panel-head'), panelBody].filter(Boolean);
     var outs = [];
     if(D_OUT && els[0] && els[0].animate){
       outs = els.map(function(el){
-        return el.animate([{opacity:1, translate:'0 0'},{opacity:0, translate:'0 -8px'}],
+        return el.animate((isMobile ? [{opacity:1},{opacity:0}] : [{opacity:1, translate:'0 0'},{opacity:0, translate:'0 -8px'}]),
                           {duration:D_OUT, easing:'cubic-bezier(.4,0,.6,1)', fill:'forwards'});
       });
     }
@@ -4866,7 +4867,7 @@ window._sceneState = {
       outs.forEach(function(a){ try{ a.cancel(); }catch(e){} });
       if(D_IN && els[0] && els[0].animate){
         els.forEach(function(el, i){
-          el.animate([{opacity:0, translate:'0 12px'},{opacity:1, translate:'0 0'}],
+          el.animate((isMobile ? [{opacity:0},{opacity:1}] : [{opacity:0, translate:'0 12px'},{opacity:1, translate:'0 0'}]),
                      {duration:D_IN, delay:i*70, easing:'cubic-bezier(.2,.7,.2,1)', fill:'backwards'});
         });
       }
@@ -7178,7 +7179,7 @@ function _zoomWobble(dt, vD, D){
     else if(focusCr !== cr && focusGoal === 1){          // 面板开着时换目标：镜头从当前石头平滑滑向新石头
       cr.group.getWorldPosition(_fv);
       _fYawSign = _fv.x >= 0 ? 1 : -1;
-      _fRate = 1.1;                                      // 起步轻，再逐渐加速到正常跟随速度（ease-in）
+      _fRate = isMobile ? 1.5 : 1.1;                                      // 起步轻，再逐渐加速到正常跟随速度（ease-in）
     }
     focusCr = cr;
     focusGoal = 1;
