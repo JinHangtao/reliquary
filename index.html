@@ -4836,11 +4836,52 @@ window._sceneState = {
         card.appendChild(rip);
         setTimeout(function(){ rip.remove(); }, 600);
         // Open the target panel after ripple starts
-        setTimeout(function(){ openPanel(sec); }, 180);
+        var _tcr = crystals.filter(function(c){ return c.section === sec; })[0];
+        if(_tcr && panelOpen) _switchPanelTo(sec, _tcr);      // 面板已开：镜头滑向目标石头，内容淡出→换页→淡入
+        else setTimeout(function(){ openPanel(sec); }, 180);
       });
     });
   }
 
+
+  // ── 面板内切换页面（About 里的三个入口）：不再硬切 ──
+  // 镜头沿用点击石头时的聚焦镜头，从当前石头平滑滑向目标石头；内容同时淡出 → 换页 → 淡入。
+  var _swBusy = false;
+  function _switchPanelTo(sec, cr){
+    if(_swBusy) return;
+    _swBusy = true;
+    setCamFocus(cr);
+    var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion:reduce)').matches;
+    var D_OUT = reduce ? 0 : 170, D_IN = reduce ? 0 : 440;
+    var els = [panelEl.querySelector('.panel-head'), panelBody].filter(Boolean);
+    var outs = [];
+    if(D_OUT && els[0] && els[0].animate){
+      outs = els.map(function(el){
+        return el.animate([{opacity:1, translate:'0 0'},{opacity:0, translate:'0 -8px'}],
+                          {duration:D_OUT, easing:'cubic-bezier(.4,0,.6,1)', fill:'forwards'});
+      });
+    }
+    setTimeout(function(){
+      try{ openPanel(sec); }finally{ _swBusy = false; }
+      outs.forEach(function(a){ try{ a.cancel(); }catch(e){} });
+      if(D_IN && els[0] && els[0].animate){
+        els.forEach(function(el, i){
+          el.animate([{opacity:0, translate:'0 12px'},{opacity:1, translate:'0 0'}],
+                     {duration:D_IN, delay:i*70, easing:'cubic-bezier(.2,.7,.2,1)', fill:'backwards'});
+        });
+      }
+    }, D_OUT);
+    // 镜头大致到位时，在新石头处回一圈很轻的余波
+    setTimeout(function(){
+      try{
+        var ss = window._sceneState;
+        if(ss && ss.shockWaves && panelOpen && focusCr === cr){
+          var p = _stoneXY(cr), big = Math.max(window.innerWidth, window.innerHeight);
+          ss.shockWaves.push({ x:p.x, y:p.y, radius:0, maxRadius:big*0.5, strength:0.45, speed:6.5, ca:0 });
+        }
+      }catch(e){}
+    }, 700);
+  }
 
   // [perf] 声音面板的 <audio> 改为按需加载：
   // 以前每次进入面板都会立刻请求 mp3 + 解析元数据 + 建立解码管线，正好撞上拖动视角的几帧。
@@ -7114,7 +7155,7 @@ function _zoomWobble(dt, vD, D){
   // 点击石头：相机沿一条弧线绕石头小幅环绕 + 推近，镜头略收窄、轻微滚转，
   // 并把石头构图在面板之外的可见区域。关闭面板后沿原路平滑退回。
   // 用临界阻尼弹簧驱动（无过冲、可被打断），再叠一层 smoothstep 让起步更柔。
-  var focusCr=null, focusGoal=0, focusW=0, focusVel=0, focusE=0, focusSnap=false, _fYawSign=1;
+  var focusCr=null, focusGoal=0, focusW=0, focusVel=0, focusE=0, focusSnap=false, _fYawSign=1, _fYawCur=1, _fRate=6;
   var _fPos=new THREE.Vector3(), _fv=new THREE.Vector3(), _fd=new THREE.Vector3();
   var _ff=new THREE.Vector3(),  _rt=new THREE.Vector3(), _fUp=new THREE.Vector3(0,1,0);
   var _fq=new THREE.Quaternion(), _fLoc=new THREE.Vector3();
@@ -7134,6 +7175,11 @@ function _zoomWobble(dt, vD, D){
     if(!cr){ focusGoal = 0; return; }
     if(window._lensRefocusNow) window._lensRefocusNow();   // 点击瞬间若正处于“镜头呼吸”模糊中：快速对焦，避免与聚焦镜头叠加
     if(!focusCr || focusW < 0.002) focusSnap = true;    // 从静止开始：锁定起点
+    else if(focusCr !== cr && focusGoal === 1){          // 面板开着时换目标：镜头从当前石头平滑滑向新石头
+      cr.group.getWorldPosition(_fv);
+      _fYawSign = _fv.x >= 0 ? 1 : -1;
+      _fRate = 1.1;                                      // 起步轻，再逐渐加速到正常跟随速度（ease-in）
+    }
     focusCr = cr;
     focusGoal = 1;
     // 角落石头的名字原本是固定 CSS：聚焦开始前量一次静止位置，之后在静止位与石头下方之间混合
@@ -7978,8 +8024,12 @@ resetIdleTimer();
 
     if(focusE > 0.0004 && focusCr){
       focusCr.group.getWorldPosition(_fv);
-      if(focusSnap){ _fPos.copy(_fv); _fYawSign = _fv.x >= 0 ? 1 : -1; focusSnap = false; }
-      else _fPos.lerp(_fv, 1 - Math.exp(-_fdt*6));     // 跟随漂浮的石头，带一点延迟
+      if(focusSnap){ _fPos.copy(_fv); _fYawSign = _fv.x >= 0 ? 1 : -1; _fYawCur = _fYawSign; _fRate = 6; focusSnap = false; }
+      else {
+        _fRate += (6 - _fRate) * (1 - Math.exp(-_fdt*3));            // 换目标时从慢到快，平常恒为 6
+        _fPos.lerp(_fv, 1 - Math.exp(-_fdt*_fRate));
+        _fYawCur += (_fYawSign - _fYawCur) * (1 - Math.exp(-_fdt*2.2));   // 环绕方向换边时也平滑过渡
+      }     // 跟随漂浮的石头，带一点延迟
 
       var _bx = _vpX, _by = _vpY, _bz = _vpZ;   // 起点：当下所在视角的相机位置
       _fd.set(_bx - _fPos.x, _by - _fPos.y, _bz - _fPos.z);
@@ -7998,7 +8048,7 @@ resetIdleTimer();
         if(isMobile) _kT = Math.min(_kT, 0.12);
       }
       var _k    = 1 - _kT*focusE;
-      var _yaw  = _fYawSign * (_cor ? 0.20 : 0.24) * (isMobile ? 0.5 : 1) * focusE;   // 环绕：手机收小，避免侧移出屏
+      var _yaw  = _fYawCur * (_cor ? 0.20 : 0.24) * (isMobile ? 0.5 : 1) * focusE;   // 环绕：手机收小，避免侧移出屏
       var _cs = Math.cos(_yaw), _sn = Math.sin(_yaw);
       var _ex = _fPos.x + (_fd.x*_cs + _fd.z*_sn) * _k;
       var _ey = _fPos.y +  _fd.y * _k + 14*focusE;    // 略抬高，轻微俯视
@@ -8039,7 +8089,7 @@ resetIdleTimer();
       var _blx = _viewTargetX, _bly = _viewTargetY;
       camera.up.set(_viewUpX + (0-_viewUpX)*focusE, _viewUpY + (1-_viewUpY)*focusE, _viewUpZ + (0-_viewUpZ)*focusE).normalize();
       camera.lookAt(_blx + (_lx-_blx)*focusE, _bly + (_ly-_bly)*focusE, _lz*focusE);
-      camera.rotateZ(-_fYawSign * 0.035 * focusE);    // 轻微滚转，增加镜头感
+      camera.rotateZ(-_fYawCur * 0.035 * focusE);    // 轻微滚转，增加镜头感
       _fq.copy(camera.quaternion);
     } else {
       // 自由视角：位姿已在上方算好
@@ -8310,19 +8360,20 @@ resetIdleTimer();
       if(cr.isCorner){
         if(focusE > 0.0004 && cr === focusCr){
           // 被点击的角落石头：留在世界空间，让镜头绕着它转；用指数平滑吸收 camCx 的瞬时归零
-          var _ka = 1 - Math.exp(-_fdt*12);
+          cr._lockB = 0; var _ka = 1 - Math.exp(-_fdt*12);
           cr.group.position.x += (targX - cr.group.position.x) * _ka;
           cr.group.position.y += (targY - cr.group.position.y) * _ka;
           cr.group.position.z += (targZ - cr.group.position.z) * _ka;
         } else {
+        cr._lockB = Math.min(focusE, (cr._lockB||0) + _fdt*1.8);   // 刚失去焦点时，用约 0.5s 从世界位置滑回屏幕角落
         if(focusE > 0.0004 && !isMobile){
           // 保持"相机空间坐标"不变 → 角落晶体在屏幕上不跟着镜头飞走
           // 手机端不锁定：About / Blog 石头留在世界空间，随镜头变化一起移动
           _fLoc.set(positions2D[i][0], positions2D[i][1] + floatOffset, positions2D[i][2] - 520)
                .applyQuaternion(_fq).add(camera.position);
-          targX += (_fLoc.x - targX) * focusE;
-          targY += (_fLoc.y - targY) * focusE;
-          targZ += (_fLoc.z - targZ) * focusE;
+          targX += (_fLoc.x - targX) * cr._lockB;
+          targY += (_fLoc.y - targY) * cr._lockB;
+          targZ += (_fLoc.z - targZ) * cr._lockB;
         }
         cr.group.position.x = targX;
         cr.group.position.y = targY;
@@ -8375,7 +8426,9 @@ resetIdleTimer();
         // 聚焦时：没被点中的角落名字随 focusE 一起淡出，回位时自然淡回
         var _cOp = 0.7 + cr.hoverT*0.3;
         if(focusCr && cr !== focusCr) _cOp *= (1 - 0.92*focusE);
-        el.style.opacity = String(_cOp);
+        if(cr._cOpS === undefined) cr._cOpS = _cOp;
+        cr._cOpS += (_cOp - cr._cOpS) * _ok;
+        el.style.opacity = String(cr._cOpS);
         if(isMobile && focusCr !== cr && focusE > 0.0004 && cr._rsx !== undefined){
           // 手机：未被点击的角落石头会随镜头移动，名字跟着石头走（相对静止位的位移）
           if(cr._lblDX === undefined){ cr._lblDX = 0; cr._lblDY = 0; }
